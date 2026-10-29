@@ -8,7 +8,7 @@
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| M0 | **完成** | fork `jinbasama/Financial-API`、骨架、`config/credentials/thscode`、`hithink_doctor`、`install.ps1`；37 个单测通过 |
+| M0 | **完成** | fork `jinbasama/Financial-API`、骨架、`config/credentials/thscode`、`hithink_doctor`、`install.ps1`；48 例单测通过 |
 | M1 | 待开工 | `http.js` + core 5 工具 + doctor 探针 |
 | M2–M4 | 待开工 | 见 §10 |
 
@@ -21,7 +21,7 @@
 ### 目标
 
 1. 让 agent 能用自然语言查同花顺数据（A 股行情、财报、估值、涨停/龙虎榜、指数、基金、期货）。
-2. **零常驻上下文污染**：默认只注册 7 个工具、约 1.2k token；域级开关可再收窄。
+2. **零常驻上下文污染**：设计默认 7 个工具、约 1.1k token（M0 只实现 1 个）；域级开关可再收窄。
 3. **失败可解释**：缺 Key / 无权 / 限流 / 空数据 四类失败给出可执行的下一步，不伪造数据。
 4. **可整体禁用**：`enabled: false` 一台开关关掉全部工具。
 5. **上游可同步**：fork 保留官方契约文档，接口变更时能 diff。
@@ -77,7 +77,7 @@ Financial-API/                      ← fork 自 20170922/Financial-API（MIT）
         ├── DESIGN.md                ← 本文件
         ├── package.json             ← dsh.bundle.patch + dsh.client 一律不加 UI
         ├── cordis.patch.yml         ← 只 insert 一行
-        ├── install.ps1 / uninstall.ps1
+        ├── install.ps1        （安装与卸载：-Remove）
         ├── lib/                     ← 见 §4
         ├── skills/hithink-finance/  ← 改造版 Skill（见 §4.8）
         └── test/                    ← node --test，无第三方测试框架
@@ -121,7 +121,7 @@ $DSH_HOME/hithink-finance/
 
 `domains` 默认：`{ core: true, special: true, index: false, fund: false, futures: false, calendar: false }`
 
-- 默认开 7 个工具 ≈ 1.2k token；全开 11 个 ≈ 2k token。
+- 默认开 7 个工具 ≈ 1.1k token；全开 11 个 ≈ 1.8k token。
 - 关闭的域**不注册工具**（不是注册了再返回「未启用」），这样上下文真的省下来。
 
 校验走原生断言，**不引入 zod**：DSH profile 里已有多份 zod，插件零依赖才不会撞 peer 冲突（`dsh-windows-mcp` 也是零运行时依赖）。
@@ -133,13 +133,13 @@ $DSH_HOME/hithink-finance/
 1. `config.apiKey`
 2. `process.env[config.apiKeyEnv]`
 3. `$DSH_HOME/hithink-finance/credentials.env`（Windows 亦兼容 `%APPDATA%\hithink-finance\credentials.env`）
-4. 兼容旧名 `FUYAO_TOKEN` / `API_KEY`（只在 1–3 全空时）
-5. 都没有 → 抛 `AUTH_MISSING`，`hint` 指向 `https://fuyao.aicubes.cn/admin/`（**带末尾斜杠**，否则 HTTPS 降级到 HTTP 丢登录态）
+4. 兼容旧名 `FUYAO_TOKEN`（只在 1–3 全空时）。**不收 `API_KEY`**：这个变量名太通用，别的工具也在用，把别人的密钥当 fuyao Key 发出去比让用户配一次更糟
+5. 都没有 → **返回** `{ key: null, source: 'none' }`（不抛异常），由调用方组织 `AUTH_MISSING`；`hint` 指向 `https://fuyao.aicubes.cn/admin/`（**带末尾斜杠**，否则 HTTPS 降级到 HTTP 丢登录态）
 
 额外职责：
 
-- `redact(text)`：把已解析的 Key 从任何错误消息/日志里替换成 `***`。所有对外文本过一次。
-- `source()`：返回 `'config' | 'env' | 'file' | 'legacy' | 'none'`，给 doctor 用，**不返回值本身**。
+- `redact(value, secret)`：把已解析的 Key 从任何对外文本里替换成 `***`（短于 4 字符不替换）。目前用在 execute 的 `INTERNAL` 兜底消息上；M1 起所有上游 message 都过一次。
+- `source`：字符串，形如 `'config'` / `'env:HITHINK_FINANCE_API_KEY'` / `'file:<绝对路径>'` / `'legacy-env:FUYAO_TOKEN'` / `'none'`，给 doctor 用，**不带值本身**。
 
 ### 4.3 `lib/http.js` — FuyaoClient 的 JS 移植
 
@@ -149,7 +149,7 @@ $DSH_HOME/hithink-finance/
 | --- | --- | --- |
 | `X-api-key` 头 | 保留 | 另加 `X-THS-Skill-Id: DSH-Hithink-Finance`（上游用同名字段标记来源，便于对方排障） |
 | 信封校验 `{code,message,request_id,data}` | 保留 | 校验失败 → `UPSTREAM_INVALID_RESPONSE` |
-| 业务码分段：1xxx 参数 / 2xxx 认证 / 4xxx5xxx 上游 | 保留 | 映射成对外三种错误类别 |
+| 业务码分段：1xxx 参数 / 2xxx 认证 / 4xxx5xxx 上游 | 保留 | 映射成对外错误类别（见 §7） |
 | 可重试集合 `{4001,5001,5002,5003}` + HTTP `{429,502,503,504}` | 保留 | 实测 `4001` 是限流码 |
 | 指数退避 `min(1000·2^n,8000) × (1+0.2·rand)` | 保留 | 但插件 `maxRetries=2`，最多等 ~3s，不拖回合 |
 | `Retry-After` 优先（秒/HTTP 日期，上限 30s） | 保留 | 插件降为 10s 上限 |
@@ -250,7 +250,7 @@ hithink_special
   → rows
 
 hithink_doctor
-  → { keySource, baseUrl, enabledDomains, tools, spillDir,
+  → { plugin{name,version,enabled,baseUrl}, auth{configured,source,credentialFiles,notes}, tools{registered,plannedButNotRegistered,count}, domains{enabled,all}, limits{...}, probe, note }
       probe: { endpoint, code, message, latencyMs } }
 ```
 
@@ -271,12 +271,20 @@ hithink_doctor
 
 改造后 skill 约 60–80 行，只写：能做什么 / 不能做什么 / 参数约定 / 失败怎么办 / 什么时候改用 CLI 做批量。
 
-### 4.9 `install.ps1` / `uninstall.ps1`
+### 4.9 `install.ps1`（卸载用 `-Remove`）
 
-- 幂等：备份 `package.json` → 写 `link:` 依赖 → bundles 追加（去重）→ 建 junction
-- `-Remove`：反序撤销，原样回滚到备份
+- **顺序是安全的一部分**（第一版写反了，独立复核抓出来的）：
+
+  ```
+  安装:  预检槽位 → 建/重指 junction → 改清单 → 失败则回滚 junction
+  卸载:  改清单 → 删 junction        （反向：残留 junction 无害，清单指向空目录会让 boot 失败）
+  ```
+
+- 幂等：清单已经一致时不写文件、不产生新备份
+- 槽位是普通目录（多半是 npm 装过）→ 直接拒绝，不动手
 - **不启动 DSH、不重启 DSH**（运行中改 profile 会被回写覆盖——这是本机踩过的坑）
 - 结束时打印「需要重启 DSH 生效」而不是自己动手
+- 纯 ASCII，Windows PowerShell 5.1 与 7 都能跑（本机策略会拒未签名脚本，需 `-ExecutionPolicy Bypass`）
 
 ---
 
@@ -335,7 +343,7 @@ hithink_doctor
 
 ## 7. 错误模型
 
-对外只暴露 6 类，每类都带「下一步做什么」：
+对外只暴露 7 类，每类都带「下一步做什么」：
 
 | 类别 | 触发 | 对外消息要点 |
 | --- | --- | --- |
@@ -370,8 +378,8 @@ garbage key    HTTP 200  code=2003  message=Invalid or revoked API key
 | 形态 | 工具数 | 估算常驻 token | 状态 |
 | --- | --- | --- | --- |
 | 官方 MCP 全量 | 72 | **7–10k** | 不进默认 |
-| 本插件默认（core+special+diag） | 7 | **~1.2k** | 默认 |
-| 本插件全开 | 11 | **~2.0k** | 用户可选 |
+| 本插件默认（core+special+diag） | 7 | **~1.1k** | 默认 |
+| 本插件全开 | 11 | **~1.8k** | 用户可选 |
 | 精简单域（只 core+diag） | 6 | **~0.9k** | 可选 |
 
 测算方法：`mcp-tools.json` 里 72 个工具的 `name+description+inputSchema` 序列化后 27,052 字节；中文描述按 3 字节/字 ≈ 1 token 折算。**这是估算，不是分词器实测**——M1 落地后用真实 tools 列表复核一次。
@@ -387,14 +395,14 @@ Skill 只在被加载时进上下文（约 1k token），无常驻成本。
 | 层 | 判据 | 命令 |
 | --- | --- | --- |
 | L1 加载 | 插件出现在已安装列表且不报错 | 重启后看设置页插件列表；或 `curl /hithink-finance/status`（可选诊断路由） |
-| L2 工具注册 | 工具数与域开关一致 | 会话里问 agent「列出 hithink 工具」；应为 7 |
+| L2 工具注册 | 工具数与域开关一致 | `hithink_doctor` 的 `tools.registered`；M0 = 1，M1 起默认 = 7 |
 | L3 缺 Key 行为 | 不崩溃、给 hint | 不设 Key 调 `hithink_quote` → 必须返回 `AUTH_MISSING` + admin 链接 |
 | L4 认证 | 有 Key 时成功 | `hithink_quote 600519.SH` → `code=0`，价格合理 |
 | L5 业务码 | 假 Key 返回 AUTH_DENIED 而非 UPSTREAM | 塞假 Key 调一次 |
 | L6 落盘 | 超阈值结果不塞上下文 | 查 5 年日 K → 返回 `path` + `rows`，正文只有 head |
 | L7 归一化 | `600519` / `sh600519` / `贵州茅台` 三态正确 | 前两个成功，第三个报 `SYMBOL_INVALID` 并提示先 search |
 | L8 关闭开关 | `enabled:false` 后工具消失 | 改配置 → 重启 → 工具数 0 |
-| L9 回滚 | `uninstall.ps1 -Remove` 复原 | 与安装前 `package.json` 逐字节相同 |
+| L9 回滚 | `install.ps1 -Remove` 复原 | 与安装前 `package.json` 逐字节相同（原文件须是 2 空格缩进的 JSON，即 DSH 自己写的格式） |
 
 **L3/L5 现在就能验（不需要 Key）。L4/L6 必须等 Key。**
 
@@ -423,7 +431,7 @@ Skill 只在被加载时进上下文（约 1k token），无常驻成本。
 | 上游改字段 | 解析出 null | `meta.missingFields` 计数 + M4 巡检 |
 | 限流（4001） | 批量调用失败 | 插件 `maxRetries=2` 且尊重 `Retry-After`；skill 里写明「全市场用 CLI 批量而不是逐股调」 |
 | 插件让 boot 失败 | 整个 profile 起不来 | `apply` 内部**全部 try/catch 降级**：注入失败只 warn，不抛；`failOnStartupError` 语义等价实现 |
-| 需要回滚 | —— | `uninstall.ps1 -Remove` 恢复 `package.json` 备份 + 删 junction；工具消失即恢复 |
+| 需要回滚 | —— | `install.ps1 -Remove` 去掉依赖与 bundles 条目 + 删 junction；`package.json.bak-hithink-*` 可整份还原 |
 
 **不可逆动作**：本方案没有。最坏情况是 profile `package.json` 被改坏——`install.ps1` 强制先备份 `.bak-<时间戳>`。
 

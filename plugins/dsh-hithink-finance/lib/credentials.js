@@ -20,8 +20,31 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export const CANONICAL_ENV = 'HITHINK_FINANCE_API_KEY';
-export const LEGACY_ENVS = ['FUYAO_TOKEN', 'API_KEY'];
+/**
+ * Legacy names, in order. `API_KEY` is deliberately NOT here: it is a generic
+ * name that other tools on the machine also use, and silently sending another
+ * service's key to this API is worse than asking the user to configure one.
+ * Upstream keeps it for compatibility; a plugin should not.
+ */
+export const LEGACY_ENVS = ['FUYAO_TOKEN'];
 export const ADMIN_URL = 'https://fuyao.aicubes.cn/admin/';
+
+/**
+ * Read one environment variable as a trimmed string.
+ *
+ * Property access alone is not enough: `env['constructor']` resolves through the
+ * prototype chain to a function, and `.trim` on it throws. A throw here used to
+ * be swallowed by apply()'s catch, registering zero tools with zero logs.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @param {string} name
+ * @returns {string}
+ */
+export function envString(env, name) {
+  if (env === null || typeof env !== 'object') return '';
+  const raw = env[name];
+  return typeof raw === 'string' ? raw.trim() : '';
+}
 
 const CREDENTIAL_DIR = 'hithink-finance';
 const CREDENTIAL_FILE = 'credentials.env';
@@ -95,8 +118,16 @@ export function resolveApiKey(options) {
   const explicit = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
   if (explicit !== '') return { key: explicit, source: 'config', notes };
 
-  const envName = (config.apiKeyEnv ?? '').trim() || CANONICAL_ENV;
-  const fromEnv = (env[envName] ?? '').trim();
+  const requested = typeof config.apiKeyEnv === 'string' ? config.apiKeyEnv.trim() : '';
+  // Only accept a plain environment-variable name. Rejecting anything else keeps
+  // a typo (or a hostile patch row) from resolving through the prototype chain
+  // (`constructor`, `toString`) and turning into a TypeError that apply()'s
+  // catch would swallow -- zero tools, zero logs.
+  const envName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(requested) ? requested : CANONICAL_ENV;
+  if (requested !== '' && envName !== requested) {
+    notes.push(`apiKeyEnv ${JSON.stringify(requested)} is not a valid variable name; using ${CANONICAL_ENV}`);
+  }
+  const fromEnv = envString(env, envName);
   if (fromEnv !== '') return { key: fromEnv, source: `env:${envName}`, notes };
 
   for (const path of credentialFileCandidates({ dshHome: options.dshHome, env })) {
@@ -107,7 +138,7 @@ export function resolveApiKey(options) {
   }
 
   for (const legacy of LEGACY_ENVS) {
-    const value = (env[legacy] ?? '').trim();
+    const value = envString(env, legacy);
     if (value !== '') return { key: value, source: `legacy-env:${legacy}`, notes };
   }
 

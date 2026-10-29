@@ -19,7 +19,7 @@
 | 2 | 环境变量 `apiKeyEnv`（默认 `HITHINK_FINANCE_API_KEY`） | 一次性会话、CI |
 | 3 | `$DSH_HOME/hithink-finance/credentials.env` | **推荐**，跨会话持久 |
 | 4 | `%APPDATA%\hithink-finance\credentials.env` | 官方 CLI 的位置，装了 CLI 就直接复用 |
-| 5 | 旧变量 `FUYAO_TOKEN` / `API_KEY` | 兼容老配置，仅在前四项都空时 |
+| 5 | 旧变量 `FUYAO_TOKEN` | 兼容老配置，仅在前四项都空时。**`API_KEY` 刻意不收**：这个变量名太通用，别的工具也在用，把别人的密钥当 fuyao Key 发出去比让用户配一次更糟 |
 
 第 5 项是**兜底不是推荐**：这两个变量名太泛，机器上可能被别的工具占用，得到「Key 莫名其妙不对」的症状。
 
@@ -63,7 +63,7 @@ apply()
 
 ## 5. 脱敏
 
-`redact(text, secret)` 把所有对外文本里的 Key 换成 `***`：
+`redact(value, secret)` 把对外文本里的 Key 换成 `***`（短于 4 字符不替换，避免误伤普通词）：
 
 - 错误消息
 - 日志

@@ -31,7 +31,7 @@ M0：骨架 + 诊断。**唯一可调用的工具是 `hithink_doctor`**，不含
 - M0 从「注册 0 个工具」改为「注册 `hithink_doctor`」：既无工具又无路由的插件无法证明自己加载成功。
 - 移除未使用的 `errorResult()`：M1 用真实错误模型重建，不留空壳。
 
-### 修复（审计发现，详见 `docs/AUDIT-2026-10-29.md`）
+### 修复（自查，详见 `docs/AUDIT-2026-10-29.md` 第一轮）
 
 - 同一 apply 内重复注册未去重。
 - 多个工具注册共享同一个 `output` 对象引用。
@@ -40,7 +40,22 @@ M0：骨架 + 诊断。**唯一可调用的工具是 `hithink_doctor`**，不含
 - `baseUrl` 非法时不退回默认，产生必然失败的请求。
 - 清单带 BOM 时解析失败且错误信息误导。
 - `install.ps1` 硬性要求 PowerShell 7、且依赖 `node` 必在 PATH。
+- 代码归一化的兜底 `→ SZ` 把沪市 ETF/转债/老三板判成深市（`510300` → `510300.SZ`）。
+- 认证错误按 `2001`/`2003` 分类，与线上实测（全部 `2003`）不符。
+
+### 修复（独立复核，详见 `docs/AUDIT-2026-10-29.md` 第二轮）
+
+- `install.ps1` 先改清单、后建 junction：任一步失败都会留下半坏的 profile。改为 junction 优先 + 失败回滚。
+- `apiKeyEnv` 命中原型链属性名（`constructor`）会抛 TypeError 并被 `apply` 静默吞掉：注册 0 个工具、0 条日志。
+- 清单改写不保留 CRLF，也不保留「无尾换行」；无 `dependencies` 的清单卸载后残留 `"dependencies": {}`。
+- 数字 `0`/`1` 不当布尔：`enabled: 0` 仍是启用、`fund: 1` 仍是关闭。
+- 非字符串入参被报成 `reason: 'empty'`，错误原因错。
+- `baseUrl` 接受路径/查询串/userinfo 与非回环的明文 `http`。
+- `redact()` 没有生产调用点，文档却声称所有对外文本都过它。
+- 兜底读取通用 `API_KEY`，会把别的服务的密钥当 fuyao Key 发出。
+- `plannedButNotRegistered` 未减去已注册工具。
+- 测试：`register` 载荷未被校验；「不重复注册」的断言实际锁定了重复注册；`%APPDATA%` 层与「无 dependencies」清单没有覆盖。
 
 ### 测试
 
-- 37 例，`node:test`，无第三方框架、无网络：配置 4、代码归一化 7、凭据 6、`redact` 1、回归 6、清单改写 8、插件入口 7。
+- 48 例，`node:test`，无第三方框架、无网络：`units` 28、`profile-link` 12、`plugin` 8。

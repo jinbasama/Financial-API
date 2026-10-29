@@ -190,3 +190,88 @@ test('redact: strips the secret everywhere it appears', () => {
   assert.equal(redact(text, ''), text);
   assert.equal(redact('abc', 'abc'), 'abc'); // too short to be a real key
 });
+
+// --- regressions from the independent review (2026-10-29) -----------------
+
+test('credentials: a prototype-chain name cannot crash resolution', () => {
+  // `env['constructor']` resolves to a function through the prototype chain.
+  // The first version called .trim() on it, threw a TypeError, and apply()'s
+  // catch swallowed it: zero tools, zero warnings.
+  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const resolved = resolveApiKey({
+      config: { apiKeyEnv: name },
+      env: {},
+      dshHome: mkdtempSync(join(tmpdir(), 'hithink-empty-')),
+    });
+    assert.equal(resolved.key, null, name);
+    assert.equal(resolved.source, 'none', name);
+  }
+
+  // A value that is not even a variable name is ignored with a note.
+  const invalid = resolveApiKey({
+    config: { apiKeyEnv: 'not a name' },
+    env: {},
+    dshHome: mkdtempSync(join(tmpdir(), 'hithink-empty-')),
+  });
+  assert.equal(invalid.key, null);
+  assert.equal(invalid.notes.length, 1);
+  assert.match(invalid.notes[0], /not a valid variable name/);
+});
+
+test('credentials: the %APPDATA% fallback is actually read', () => {
+  const appData = mkdtempSync(join(tmpdir(), 'hithink-appdata-'));
+  mkdirSync(join(appData, 'hithink-finance'), { recursive: true });
+  writeFileSync(
+    join(appData, 'hithink-finance', 'credentials.env'),
+    'HITHINK_FINANCE_API_KEY=from-appdata\n',
+    'utf8',
+  );
+  const resolved = resolveApiKey({
+    config: {},
+    env: { APPDATA: appData, DSH_HOME: mkdtempSync(join(tmpdir(), 'hithink-dsh-')) },
+    dshHome: mkdtempSync(join(tmpdir(), 'hithink-dsh2-')),
+  });
+  assert.equal(resolved.key, 'from-appdata');
+  assert.match(resolved.source, /^file:.*hithink-finance/);
+});
+
+test('credentials: a generic API_KEY is never adopted', () => {
+  // Another tool's key must not be sent to this API as X-api-key.
+  const resolved = resolveApiKey({
+    config: {},
+    env: { API_KEY: 'sk-some-other-service' },
+    dshHome: mkdtempSync(join(tmpdir(), 'hithink-empty-')),
+  });
+  assert.equal(resolved.key, null);
+  assert.equal(resolved.source, 'none');
+});
+
+test('config: numeric 0 and 1 behave as booleans', () => {
+  assert.equal(normalizeConfig({ enabled: 0 }).enabled, false);
+  assert.equal(normalizeConfig({ enabled: 1 }).enabled, true);
+  assert.equal(normalizeConfig({ domains: { fund: 1 } }).domains.fund, true);
+  assert.equal(normalizeConfig({ domains: { core: 0 } }).domains.core, false);
+  assert.equal(normalizeConfig({ enabled: 2 }).enabled, true, 'unknown numbers fall back');
+});
+
+test('config: baseUrl must be an origin, and http only on loopback', () => {
+  for (const bad of [
+    'https://x.test/api',
+    'https://x.test/?token=1',
+    'https://x.test/#frag',
+    'https://user:pw@x.test',
+    'http://x.test',
+  ]) {
+    assert.equal(normalizeConfig({ baseUrl: bad }).baseUrl, DEFAULTS.baseUrl, bad);
+  }
+  assert.equal(normalizeConfig({ baseUrl: 'http://127.0.0.1:7891' }).baseUrl, 'http://127.0.0.1:7891');
+  assert.equal(normalizeConfig({ baseUrl: 'http://localhost:8080' }).baseUrl, 'http://localhost:8080');
+});
+
+test('thscode: a non-string input is not reported as empty', () => {
+  const single = normalizeThsCode(600519);
+  assert.equal(single.ok, false);
+  assert.equal(single.reason, 'not_a_code');
+  const list = normalizeThsCodeList([600519]);
+  assert.deepEqual(list.rejected, [{ input: '600519', reason: 'not_a_code' }]);
+});

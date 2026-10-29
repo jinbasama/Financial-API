@@ -11,7 +11,7 @@ DeepSeek Harness 插件：把**同花顺金融数据服务**（Fuyao，`https://
 
 官方提供 6 个托管 MCP 服务、**72 个工具**。在 DSH 里挂上去零代码，但内置的 `@deepseek-ai/dsh-mcp-client` **没有工具过滤项**，全量注入约占 **7–10k token/轮次**。
 
-本插件改成按域精选：默认 7 个工具约 1.1k token，关掉的域**根本不注册**。想用全量能力时，自己往 profile patch 里加 mcp-client 行即可（片段见 [DESIGN.md](DESIGN.md) 决策 2），不需要动本插件。
+本插件改成按域精选：设计的默认组合是 7 个工具、约 1.1k token，关掉的域**根本不注册**（M0 只实现了 `hithink_doctor` 一个）。想用全量能力时，自己往 profile patch 里加 mcp-client 行即可（片段见 [DESIGN.md](DESIGN.md) 决策 2），不需要动本插件。
 
 ## 工具
 
@@ -53,7 +53,7 @@ Key 在 <https://fuyao.aicubes.cn/admin/> 用同花顺账号登录后签发（**
 2. 环境变量 `HITHINK_FINANCE_API_KEY`
 3. `$DSH_HOME\hithink-finance\credentials.env`（一行 `HITHINK_FINANCE_API_KEY=<key>`，**值不能带引号**）
 4. `%APPDATA%\hithink-finance\credentials.env`（上游 CLI 的位置）
-5. 旧变量 `FUYAO_TOKEN` / `API_KEY`
+5. 旧变量 `FUYAO_TOKEN`（**不收 `API_KEY`**：这个变量名太通用，别的工具也在用）
 
 Key 只在 `apply` 时读一次——改完要重启 DSH。细节与轮换见 [docs/CREDENTIALS.md](docs/CREDENTIALS.md)。
 
@@ -85,7 +85,7 @@ Key 只在 `apply` 时读一次——改完要重启 DSH。细节与轮换见 [d
 
 ```bash
 npm run check   # 七个文件的语法检查
-npm test        # 37 例，无第三方框架、无网络
+npm test        # 48 例，无第三方框架、无网络
 ```
 
 测试布局、覆盖与未覆盖、沙箱 `EPERM` 坑见 [docs/TESTING.md](docs/TESTING.md)。
@@ -105,7 +105,7 @@ npm test        # 37 例，无第三方框架、无网络
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 症状→原因→处置、业务码表、五条快速判据 |
 | [docs/TESTING.md](docs/TESTING.md) | 怎么跑、覆盖什么、没覆盖什么、真实验收流程 |
 | [docs/UPSTREAM.md](docs/UPSTREAM.md) | 上游来源、MIT 复用逐文件表、许可证边界、同步与漂移巡检 |
-| [docs/AUDIT-2026-10-29.md](docs/AUDIT-2026-10-29.md) | M0 代码审计：21 项缺陷、复核结论、残留风险 |
+| [docs/AUDIT-2026-10-29.md](docs/AUDIT-2026-10-29.md) | M0 代码审计：21 项自查 + 13 项独立复核、复核结论、残留风险 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本记录 |
 | [AGENTS.md](AGENTS.md) | 给后续 agent 的约束与文档同步表 |
 
@@ -120,7 +120,7 @@ lib/tools/diag.js         hithink_doctor
 lib/tools/render.js       输出渲染
 scripts/profile-link.mjs  profile 清单改写（保留键序与行尾）
 install.ps1               安装/卸载（junction + 清单）
-test/                     37 例，node:test
+test/                     48 例，node:test
 docs/                     九份文档
 ```
 

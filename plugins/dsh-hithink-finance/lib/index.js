@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DOMAIN_KEYS, enabledDomains, normalizeConfig } from './config.js';
-import { resolveApiKey } from './credentials.js';
+import { redact, resolveApiKey } from './credentials.js';
 import { diagTool } from './tools/diag.js';
 import { objectOutput } from './tools/render.js';
 
@@ -156,12 +156,14 @@ function registerTools(ctx, warn, state) {
                   dshHome: state.dshHome,
                 }, args ?? {});
               } catch (error) {
-                // A tool must never surface as an opaque harness fault.
+                // A tool must never surface as an opaque harness fault, and the
+                // message must not carry the key: upstream errors can embed the
+                // request URL, and M1 puts the key in a header it may echo.
                 return {
                   ok: false,
                   error: {
                     category: 'INTERNAL',
-                    message: String(error?.message ?? error),
+                    message: redact(String(error?.message ?? error), state.creds.key),
                     retryable: false,
                   },
                 };

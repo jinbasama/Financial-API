@@ -41,7 +41,7 @@
 
 **容错规则**（`lib/config.js`）：
 
-- 布尔接受 `true/false`、字符串 `"true"/"false"/"1"/"0"`。
+- 布尔接受 `true/false`、数字 `0/1`、字符串 `"true"/"false"/"1"/"0"`；其他值退回默认。
 - 整数越界被钳到边界，非数字退回默认。
 - `baseUrl` 不是合法 http(s) URL 就退回默认——否则会拼出 `fetch("https:/api/...")` 这种必然失败的请求。
 - 未知字段**被忽略**（不报错）：patch 里多写一项不该让 boot 失败。
@@ -58,7 +58,7 @@
 | `futures` | `hithink_futures` | 关 | ~200 |
 | `calendar` | `hithink_calendar` | 关 | ~120 |
 
-**默认（diag+core+special）≈ 1.1k token；全开 ≈ 1.9k。** 关掉的域不注册，省的是实打实的上下文，不是「注册了再拒绝」。
+**默认（diag+core+special）≈ 1.1k token；全开 ≈ 1.8k**（本表逐项相加是 1050 / 1750；估算，不是分词器实测）。关掉的域不注册，省的是实打实的上下文，不是「注册了再拒绝」。
 
 对照：官方 6 个托管 MCP 全量 72 个工具约 7–10k token/轮次。差 5–8 倍。
 

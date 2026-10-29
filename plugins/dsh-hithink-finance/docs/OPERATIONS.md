@@ -12,7 +12,7 @@ cd <repo>\plugins\dsh-hithink-finance
 .\install.ps1              # 真装
 ```
 
-`install.ps1` 只做三件事：
+`install.ps1` 只做三件事，**顺序是先 junction、后清单**——清单指向一个不存在的目录会让 boot 失败，所以失败时要能把 junction 回滚：
 
 1. `dependencies["dsh-hithink-finance"] = "link:<包根>"`
 2. `dsh.profile.bundles += "dsh-hithink-finance"`
@@ -30,9 +30,9 @@ cd <repo>\plugins\dsh-hithink-finance
 | `-NodePath <node.exe>` | node 不在 PATH 时指定 |
 | `-Force` | 明知 DSH 在跑也要改（不建议） |
 
-**node 要求 ≥ 22.12**。脚本用 node 改 JSON 而不是 PowerShell，是因为 `JSON.stringify` 能保留键序，而 PowerShell 的 JSON 往返会重排并踩编码坑。node 查找顺序：`-NodePath` → `$env:DSH_NODE` → PATH → `%ProgramFiles%\nodejs` → `%LOCALAPPDATA%\Programs\nodejs`。
+**执行策略**：本机默认策略会拒绝未签名脚本（`PSSecurityException`）。若裸跑 `.\install.ps1` 被拒，用上面的 `-ExecutionPolicy Bypass` 形式。**node 要求 ≥ 22.12**。脚本用 node 改 JSON 而不是 PowerShell，是因为 `JSON.stringify` 能保留键序，而 PowerShell 的 JSON 往返会重排并踩编码坑。node 查找顺序：`-NodePath` → `$env:DSH_NODE` → PATH → `%ProgramFiles%\nodejs` → `%LOCALAPPDATA%\Programs\nodejs`。
 
-**兼容性**：`install.ps1` 是纯 ASCII，可在 Windows PowerShell 5.1 与 PowerShell 7 下运行，两种都实测过 `-DryRun`。
+**兼容性**：`install.ps1` 是纯 ASCII，可在 Windows PowerShell 5.1 与 PowerShell 7 下运行，两者都实测过 `-DryRun`（实测命令是 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -DryRun` 与 `pwsh -NoProfile -File .\install.ps1 -DryRun`）。
 
 ## 2. 验收分级
 
@@ -48,7 +48,7 @@ cd <repo>\plugins\dsh-hithink-finance
 | L6 | 大结果落盘 | 查 5 年日 K，返回 `path` 与 `rows`，正文只有 head | 待 M2 |
 | L7 | 代码归一化三态 | `600519` 与 `sh600519` 成功，`贵州茅台` 报 `SYMBOL_INVALID` | 能，M1 起 |
 | L8 | 关闭开关后工具消失 | `enabled:false` 后重启，工具不再出现 | 能 |
-| L9 | 能干净回滚 | `install.ps1 -Remove` 后清单回到安装前 | 能 |
+| L9 | 能干净回滚 | `install.ps1 -Remove` 后清单回到安装前（原清单须是 2 空格缩进、与 DSH 自己写出的格式一致，才能逐字节相同） | 能 |
 
 **安装期可判的两条**，不需要重启：
 
@@ -56,7 +56,7 @@ cd <repo>\plugins\dsh-hithink-finance
 # 清单是否指向本包，退出码 0 表示是
 node scripts\profile-link.mjs --action check --profile desktop --name dsh-hithink-finance
 
-# 单元与集成测试，37 例，不联网
+# 单元与集成测试，48 例，不联网
 npm test
 ```
 

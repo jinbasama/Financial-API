@@ -48,6 +48,14 @@ const INTEGER_BOUNDS = {
 
 function asBoolean(value, fallback) {
   if (typeof value === 'boolean') return value;
+  // YAML users write `enabled: 0` / `fund: 1` as often as `false`/`true`; a
+  // config that silently does the opposite of what was written is worse than
+  // rejecting it.
+  if (typeof value === 'number') {
+    if (value === 0) return false;
+    if (value === 1) return true;
+    return fallback;
+  }
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
     if (normalized === 'true' || normalized === '1') return true;
@@ -68,9 +76,16 @@ function asText(value, fallback) {
   return trimmed === '' ? fallback : trimmed;
 }
 
+/** Hosts allowed to use plain http: a loopback address, e.g. a local proxy. */
+const LOOPBACK_HOST = /^(127(\.\d{1,3}){3}|localhost|\[::1\])$/i;
+
 /**
- * A usable API root is an absolute http(s) URL with a host. Anything else falls
- * back to the default rather than producing `fetch("https:/api/...")` later.
+ * A usable API root is an absolute URL whose origin is the whole endpoint.
+ *
+ * Rejected on purpose: a path, query, hash or userinfo (they would be spliced
+ * into every request path), and plain http on a non-loopback host -- the API key
+ * travels in a header, and a cleartext hop would expose it. Anything rejected
+ * falls back to the default instead of producing a request that cannot work.
  *
  * @param {unknown} value
  * @returns {string}
@@ -81,6 +96,10 @@ export function normalizeBaseUrl(value) {
     const url = new URL(text);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return DEFAULTS.baseUrl;
     if (url.hostname === '') return DEFAULTS.baseUrl;
+    if (url.username !== '' || url.password !== '') return DEFAULTS.baseUrl;
+    if (url.search !== '' || url.hash !== '') return DEFAULTS.baseUrl;
+    if (url.pathname !== '' && url.pathname !== '/') return DEFAULTS.baseUrl;
+    if (url.protocol === 'http:' && !LOOPBACK_HOST.test(url.hostname)) return DEFAULTS.baseUrl;
     return text;
   } catch {
     return DEFAULTS.baseUrl;

@@ -58,10 +58,10 @@
 ## 3. 五条快速判据
 
 ```powershell
-# 1. 插件是否被 loader 认得（返回 true 才说明清单与 junction 都在）
+# 1. 插件是否在 bundles 里（返回 true 只说明清单登记了，不代表 junction 存在）
 node -e "const p=require(process.env.DSH_HOME+'/profiles/desktop/package.json'); console.log(p.dsh.profile.bundles.includes('dsh-hithink-finance'))"
 
-# 2. junction 指向对不对（退出码 0 = 对）
+# 2. 清单里的 link: 是否指向本包（退出码 0 = 指向对；此命令不检查 junction）
 node scripts\profile-link.mjs --action check --profile desktop --name dsh-hithink-finance
 
 # 3. 凭据文件到底在哪、有没有被读到（不打印值）
@@ -74,7 +74,7 @@ node -e "fetch('https://fuyao.aicubes.cn/api/a-share/prices/snapshot?thscodes=60
 Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
 ```
 
-第 4 条要注意：`type=2003` 说明**网络与端点都正常**，问题在凭据；如果连不上（超时/DNS），才是网络问题。
+第 4 条要注意：响应体 `code=2003` 说明**网络与端点都正常**，问题在凭据；如果连不上（超时/DNS），才是网络问题。
 
 ## 4. 常见误判
 
@@ -82,9 +82,9 @@ Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
 
 **「装了插件但 Web UI 反而打不开」** —— 本插件没有客户端半，不进 UI。若出现这种症状，先怀疑别的插件；用 `enabled:false` 隔离验证。
 
-**「hithink_doctor 里 previous 有值」** —— 那是安装时被替换掉的旧版本号，不是错误。
+**「hithink_doctor 里没有 previous 字段」** —— 正常：`previous` 是 `install.ps1` 调用 `profile-link.mjs add` 时打印的、被替换掉的旧依赖值，不在 doctor 输出里。
 
-**「中文名查不到」** —— 设计如此。插件拒绝对中文名猜交易所；先 `hithink_symbol_search`。
+**「中文名/基金代码查不到」** —— 设计如此。插件拒绝对中文名猜交易所，也拒绝为基金、债券、三板代码猜后缀；先 `hithink_symbol_search`，或直接写全 `510300.SH`。
 
 **「返回空但上游说支持」** —— 先确认是不是 today-only 端点查了历史日期，或该 capability 你的账号没权限（`2003` 有时被上层包装成看起来的空结果，M1 起插件会显式区分）。
 

@@ -35,7 +35,9 @@ function withCleanEnv(fn) {
   }
 }
 
-/** Minimal stand-in for the host cordis context. */
+/** Minimal stand-in for the host cordis context that also enforces the host's
+ * registration contract, so a malformed tool definition fails the test instead
+ * of passing silently. */
 function fakeContext() {
   const registered = [];
   const warnings = [];
@@ -46,6 +48,16 @@ function fakeContext() {
       callback({
         tools: {
           register: (definition) => {
+            assert.equal(typeof definition.name, 'string');
+            assert.ok(definition.name.length > 0, 'name must not be empty');
+            assert.equal(typeof definition.description, 'string');
+            assert.ok(definition.description.length > 0, 'description must not be empty');
+            assert.equal(typeof definition.parameters, 'object');
+            assert.equal(definition.parameters.type, 'object');
+            assert.equal(typeof definition.output, 'object');
+            assert.equal(typeof definition.output.schema, 'object');
+            assert.equal(typeof definition.output.render, 'function');
+            assert.equal(typeof definition.execute, 'function');
             registered.push(definition);
             return () => {};
           },
@@ -105,15 +117,26 @@ test('apply never throws, even with a hostile config or context', () => {
   });
 });
 
-test('re-applying does not double-register the same tool id', () => {
+test('one apply registers each tool id once', () => {
   withCleanEnv(() => {
     const { ctx, registered } = fakeContext();
     apply(ctx, { apiKey: 'sk-test-123456', domains: { core: true } });
-    apply(ctx, { apiKey: 'sk-test-123456', domains: { core: true } });
-    // Two apply() calls mean two registrations by the host's contract; what must
-    // not happen is one apply() registering the same id twice.
+
+    const names = registered.map((tool) => tool.name);
+    assert.deepEqual(names, ['hithink_doctor']);
+    assert.equal(new Set(names).size, names.length, 'no id may repeat within one apply');
+  });
+});
+
+test('two applies produce two registrations, one per apply', () => {
+  // The host may re-apply a plugin (reload). Each apply owns its own state, so
+  // each registers its own set; the `seen` guard inside registerTools keeps a
+  // single apply from registering the same id twice once M1 adds more tools.
+  withCleanEnv(() => {
+    const { ctx, registered } = fakeContext();
+    apply(ctx, { apiKey: 'sk-test-123456' });
+    apply(ctx, { apiKey: 'sk-test-123456' });
     assert.equal(registered.length, 2);
-    assert.deepEqual(registered.map((tool) => tool.name), ['hithink_doctor', 'hithink_doctor']);
   });
 });
 

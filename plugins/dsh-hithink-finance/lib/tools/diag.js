@@ -44,7 +44,9 @@ export function buildReport(deps) {
     },
     tools: {
       registered,
-      plannedButNotRegistered: planned,
+      // Subtracting what is registered keeps this honest once M1 adds the data
+      // tools: the field means "declared for an enabled domain but not wired".
+      plannedButNotRegistered: planned.filter((id) => !registered.includes(id)),
       count: registered.length,
     },
     domains: {

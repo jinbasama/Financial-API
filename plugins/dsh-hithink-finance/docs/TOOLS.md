@@ -44,12 +44,12 @@
 
 **读法**：
 
-| 字段 | 含义 |
-| --- | --- |
-| `auth.configured=false` | 所有数据工具都会返回 `AUTH_MISSING`；按 `credentialFiles` 的第一条去放 Key |
-| `auth.source="env:HITHINK_FINANCE_API_KEY"` | 从环境变量拿到；注意 DSH 只在启动时继承环境，改完要重启 |
-| `tools.plannedButNotRegistered` 非空 | 正常（M0）；等对应里程碑 |
-| `domains.enabled` 缺 `fund` | 基金域没开，去 [CONFIGURATION.md](CONFIGURATION.md) 打开 |
+  字段   含义  
+  ---   ---  
+  `auth.configured=false`   所有数据工具都会返回 `AUTH_MISSING`；按 `credentialFiles` 的第一条去放 Key  
+  `auth.source="env:HITHINK_FINANCE_API_KEY"`   从环境变量拿到；注意 DSH 只在启动时继承环境，改完要重启  
+  `tools.plannedButNotRegistered` 非空   正常（M0）；等对应里程碑  
+  `domains.enabled` 缺 `fund`   基金域没开，去 [CONFIGURATION.md](CONFIGURATION.md) 打开  
 
 ---
 
@@ -61,12 +61,12 @@
 
 `GET /api/meta/tickers/search`
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `q` | string | 是 | 完整 `thscode`、纯代码或中英文名称子串 |
-| `asset_type` | string[] | 否 | `a-share`/`a-share-index`/`fund-etf`/`fund-lof`/`fund-otc`/`fund-reits`/`futures`/`options`/`forex` |
-| `exchange` | string | 否 | `SSE`/`SZSE`/`BSE`/`CFFEX`/`SHFE`/`INE`/`DCE`/`CZCE`/`GFEX` |
-| `limit` | int | 否 | 1–50，默认 10 |
+  参数   类型   必填   说明  
+  ---   ---   ---   ---  
+  `q`   string   是   完整 `thscode`、纯代码或中英文名称子串  
+  `asset_type`   string[]   否   `a-share`/`a-share-index`/`fund-etf`/`fund-lof`/`fund-otc`/`fund-reits`/`futures`/`options`/`forex`  
+  `exchange`   string   否   `SSE`/`SZSE`/`BSE`/`CFFEX`/`SHFE`/`INE`/`DCE`/`CZCE`/`GFEX`  
+  `limit`   int   否   1–50，默认 10  
 
 返回行含 `thscode`、名称、资产类型、交易所。**名称一律先走这里**：插件拒绝对中文名猜测交易所（见 `lib/thscode.js`），因为猜错会返回另一家公司的数据。
 
@@ -74,9 +74,9 @@
 
 `GET /api/a-share/prices/snapshot?thscodes=a,b,c`
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `thscodes` | string[] | 是 | 1–50 只；接受 `600519` / `sh600519` / `600519.SH`，由插件归一化 |
+  参数   类型   必填   说明  
+  ---   ---   ---   ---  
+  `thscodes`   string[]   是   1–50 只；接受 `600519` / `sh600519` / `600519.SH`，由插件归一化  
 
 返回 `thscode`、`last_price`、`price_change`、`price_change_ratio_pct`、开高低、`prev_price`、`volume`、`turnover`，外加 `timestamp`。
 
@@ -86,11 +86,11 @@
 
 `GET /api/a-share/prices/historical`
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `thscode` | string | 是 | **仅单只**，不接受逗号 |
-| `start` / `end` | string | 是 | `YYYY-MM-DD` 或毫秒时间戳 |
-| `adjust` | enum | 否 | `none`/`forward`（默认）/`backward` |
+  参数   类型   必填   说明  
+  ---   ---   ---   ---  
+  `thscode`   string   是   **仅单只**，不接受逗号  
+  `start` / `end`   string   是   `YYYY-MM-DD` 或毫秒时间戳  
+  `adjust`   enum   否   `none`/`forward`（默认）/`backward`  
 
 **硬约束**：`interval` 当前只支持 `1d`；`end - start` **不得超过 10 年**（上游越界报 `code=1003`，插件在本地先拒绝，省一次往返）。
 
@@ -98,13 +98,13 @@
 
 ### 2.4 `hithink_financials` — 财报（M1）
 
-`GET /api/a-share/financials/{income-statements|balance-sheets|cash-flow-statements|indicators}`
+`GET /api/a-share/financials/{income-statements balance-sheets cash-flow-statements indicators}`
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `thscode` | string | 是 | 单只 |
-| `statement` | enum | 是 | `income`/`balance`/`cash`/`indicators` |
-| `limit` | int | 否 | 最近 N 期，默认 4 |
+  参数   类型   必填   说明  
+  ---   ---   ---   ---  
+  `thscode`   string   是   单只  
+  `statement`   enum   是   `income`/`balance`/`cash`/`indicators`  
+  `limit`   int   否   最近 N 期，默认 4  
 
 返回行的报告期字段是 `report_period`。分析时**必须带上报告期**，不要跨期比较而不声明。
 
@@ -112,9 +112,9 @@
 
 `GET /api/a-share/valuations/snapshot?thscodes=...`
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `thscodes` | string[] | 是 | 1–50 只 |
+  参数   类型   必填   说明  
+  ---   ---   ---   ---  
+  `thscodes`   string[]   是   1–50 只  
 
 返回 `pe_ttm`、`pe_mrq`、`pb_mrq`、`ps_ttm`、`pcf_ttm` 等。**保留 null 与负数**（亏损公司的 PE 就是负的，不能抹平）。
 
@@ -122,22 +122,22 @@
 
 `GET /api/a-share/special-data/*`
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `kind` | enum | 是 | `limit_up`/`limit_down`/`limit_break`/`ladder`/`dragon_tiger`/`hot_stock`/`anomaly`/`skyrocket` |
-| `date` | string | 否 | `YYYY-MM-DD`；`anomaly` 类为 today-only |
-| `page` / `size` | int | 否 | 池类分页（`limit-*-pool`），默认 1/50 |
+  参数   类型   必填   说明  
+  ---   ---   ---   ---  
+  `kind`   enum   是   `limit_up`/`limit_down`/`limit_break`/`ladder`/`dragon_tiger`/`hot_stock`/`anomaly`/`skyrocket`  
+  `date`   string   否   `YYYY-MM-DD`；`anomaly` 类为 today-only  
+  `page` / `size`   int   否   池类分页（`limit-*-pool`），默认 1/50  
 
 `kind → 端点` 映射：`limit_up→limit-up-pool`、`limit_down→limit-down-pool`、`limit_break→limit-break-pool`、`ladder→limit-up-ladder`、`dragon_tiger→dragon-tiger-list`、`hot_stock→hot-stock-list`、`anomaly→anomaly-analysis-list`、`skyrocket→skyrocket-list`。
 
 ### 2.7 `hithink_index` — 指数与板块（M3）
 
-| `action` | 端点 | 备注 |
-| --- | --- | --- |
-| `catalog` | `/api/a-share-index/catalog/ths-index-list` | 指数/板块目录 |
-| `constituents` | `/api/a-share-index/constituents/ths-stock-list` | 成分股 |
-| `snapshot` | `/api/a-share-index/prices/snapshot` | 快照 |
-| `history` | `/api/a-share-index/prices/historical` | 单只、窗口 ≤10 年 |
+  `action`   端点   备注  
+  ---   ---   ---  
+  `catalog`   `/api/a-share-index/catalog/ths-index-list`   指数/板块目录  
+  `constituents`   `/api/a-share-index/constituents/ths-stock-list`   成分股  
+  `snapshot`   `/api/a-share-index/prices/snapshot`   快照  
+  `history`   `/api/a-share-index/prices/historical`   单只、窗口 ≤10 年  
 
 ### 2.8 `hithink_fund` — 公募基金（M3）
 
@@ -161,14 +161,14 @@
 
 以下不是「还没做」，是上游**不通过公开 API 提供**。工具不会假装有，也不会用近似值顶替。
 
-| 能力 | 上游口径 |
-| --- | --- |
-| 分钟 K / tick / Level-2 | 不提供 |
-| 港股 / 美股 | 不提供 |
-| 宏观数据、新闻公告原文、研报原文 | 不提供 |
-| 基金申赎、下单交易 | 不提供 |
-| 主力资金流向、高频动向 | **端内专用**（`capital-flow.md` 明写「当前不作为端外接入入口」） |
-| 投资建议 | 不提供，也不产出 |
+  能力   上游口径  
+  ---   ---  
+  分钟 K / tick / Level-2   不提供  
+  港股 / 美股   不提供  
+  宏观数据、新闻公告原文、研报原文   不提供  
+  基金申赎、下单交易   不提供  
+  主力资金流向、高频动向   **端内专用**（`capital-flow.md` 明写「当前不作为端外接入入口」）  
+  投资建议   不提供，也不产出  
 
 数据缺失时返回 `EMPTY`（业务码 3002），**不补 0、不返回模拟数据**。
 
@@ -176,15 +176,15 @@
 
 ## 4. 窗口与分页速查
 
-| 约束 | 端点 |
-| --- | --- |
-| 单只、≤10 年 | `/api/a-share/prices/historical`、`/api/a-share-index/prices/historical` |
-| 单只、≤5 年 | `/api/fund/market/historical`、`/api/fund/performance/indicators-historical` |
-| 单只、≤1 年 | `/api/futures/positions/contract-historical` |
-| today-only | `/api/a-share/auction/snapshot`、`/api/a-share/special-data/anomaly-analysis-*`、`/api/futures/prices/intraday`、`/api/options/prices/intraday` |
-| offset 分页 | `/api/meta/tickers/list`、`/api/a-share/prices/snapshot`（省略 `thscodes` 时）、`/api/futures/contracts/list`、`/api/options/contracts/list`、`/api/fund/news/article-list` |
-| page/size 分页 | `/api/a-share/special-data/limit-*-pool` |
-| json 游标 | `/api/fund/indicators/table` |
+  约束   端点  
+  ---   ---  
+  单只、≤10 年   `/api/a-share/prices/historical`、`/api/a-share-index/prices/historical`  
+  单只、≤5 年   `/api/fund/market/historical`、`/api/fund/performance/indicators-historical`  
+  单只、≤1 年   `/api/futures/positions/contract-historical`  
+  today-only   `/api/a-share/auction/snapshot`、`/api/a-share/special-data/anomaly-analysis-*`、`/api/futures/prices/intraday`、`/api/options/prices/intraday`  
+  offset 分页   `/api/meta/tickers/list`、`/api/a-share/prices/snapshot`（省略 `thscodes` 时）、`/api/futures/contracts/list`、`/api/options/contracts/list`、`/api/fund/news/article-list`  
+  page/size 分页   `/api/a-share/special-data/limit-*-pool`  
+  json 游标   `/api/fund/indicators/table`  
 
 这些约束会写进各工具的 `description`（一行），让模型一次把参数传对，而不是靠试错。
 

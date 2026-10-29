@@ -118,3 +118,53 @@ test('an unexpected dependencies shape is repaired, not crashed on', () => {
   assert.equal(Array.isArray(written.dependencies), false);
   assert.equal(written.dependencies[NAME].startsWith('link:'), true);
 });
+
+// --- regressions from the independent review (2026-10-29) -----------------
+
+test('a CRLF manifest stays CRLF after add', () => {
+  const { root, manifest, packageDir } = fixture();
+  writeFileSync(manifest, FIXTURE.replace(/\n/g, '\r\n'), 'utf8');
+
+  linkProfile({ action: 'add', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+
+  const text = readFileSync(manifest, 'utf8');
+  assert.equal(text.includes('\r\n'), true);
+  // Every newline must be part of a CRLF pair; a bare LF means a mixed file.
+  assert.equal(/(?<!\r)\n/.test(text), false, 'no bare LF may remain');
+});
+
+test('add then remove restores a manifest that had no dependencies block', () => {
+  const { root, manifest, packageDir } = fixture();
+  const minimal = JSON.stringify({ name: 'x', private: true, dsh: { profile: { bundles: [] } } }, null, 2) + '\n';
+  writeFileSync(manifest, minimal, 'utf8');
+
+  linkProfile({ action: 'add', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+  assert.equal(readFileSync(manifest, 'utf8').includes('"dependencies"'), true);
+
+  linkProfile({ action: 'remove', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+  // The empty containers we created must be gone, not left behind as `{}`.
+  assert.equal(readFileSync(manifest, 'utf8'), minimal);
+});
+
+test('remove does not delete a dependencies block the user already had', () => {
+  const { root, manifest, packageDir } = fixture();
+  const empty = JSON.stringify({ name: 'x', dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2) + '\n';
+  writeFileSync(manifest, empty, 'utf8');
+
+  linkProfile({ action: 'add', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+  linkProfile({ action: 'remove', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+
+  assert.equal(readFileSync(manifest, 'utf8'), empty);
+});
+
+test('a manifest without a trailing newline does not gain one', () => {
+  const { root, manifest, packageDir } = fixture();
+  const body = FIXTURE.replace(/\n$/, '');
+  writeFileSync(manifest, body, 'utf8');
+
+  linkProfile({ action: 'add', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+  assert.equal(readFileSync(manifest, 'utf8').endsWith('\n'), false);
+
+  linkProfile({ action: 'remove', profile: 'desktop', dshHome: root, name: NAME, packageDir });
+  assert.equal(readFileSync(manifest, 'utf8'), body);
+});

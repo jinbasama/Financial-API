@@ -4,10 +4,14 @@
   Link dsh-hithink-finance into a DSH profile (idempotent), or remove it.
 
 .DESCRIPTION
-  Does exactly three things:
-    1. dependencies["dsh-hithink-finance"] = "link:<this package root>"
-    2. dsh.profile.bundles += "dsh-hithink-finance"
-    3. node_modules\dsh-hithink-finance -> junction to this package root
+  Install order matters. A profile manifest that points at a package directory
+  which does not exist can fail the boot, so the junction is created BEFORE the
+  manifest is edited, and is rolled back if the edit fails. Uninstall does the
+  reverse: the manifest is cleaned first, then the junction is removed, so a
+  failure can never leave a manifest pointing at nothing.
+
+    install:  validate slot -> create/re-point junction -> edit manifest -> (rollback slot on failure)
+    remove:   edit manifest -> delete junction -> (a leftover junction is harmless)
 
   It never starts, stops or restarts DSH. Changing a profile manifest while DSH
   is running is unsafe (the live instance can rewrite the file), so this script
@@ -15,6 +19,10 @@
 
   Comments and messages are ASCII on purpose: a UTF-8 .ps1 without a BOM is read
   as ANSI by Windows PowerShell 5.1, and non-ASCII text then breaks parsing.
+
+.NOTES
+  Execution policy: if the machine blocks unsigned scripts, run it as
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 .PARAMETER Remove
   Undo the link: drop the dependency, drop the bundle entry, delete the junction.
@@ -36,7 +44,7 @@
   .\install.ps1 -DryRun
 
 .EXAMPLE
-  .\install.ps1 -NodePath 'C:\Program Files\nodejs\node.exe'
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 .EXAMPLE
   .\install.ps1 -Remove
@@ -85,6 +93,36 @@ function Resolve-NodeExecutable {
         'so that key order and line endings survive.')
 }
 
+# Returns @{ Kind = 'none' | 'junction' | 'other'; Target = <string or ''> }
+function Get-SlotState {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return @{ Kind = 'none'; Target = '' } }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.LinkType -ne 'Junction') { return @{ Kind = 'other'; Target = '' } }
+
+    $target = @($item.Target) | Select-Object -First 1
+    return @{ Kind = 'junction'; Target = $(if ($target) { [string]$target } else { '' }) }
+}
+
+function Test-SamePath {
+    param([string]$Left, [string]$Right)
+    if (-not $Left -or -not $Right) { return $false }
+    try {
+        return (Resolve-Path -LiteralPath $Left).Path -eq (Resolve-Path -LiteralPath $Right).Path
+    } catch {
+        return $false
+    }
+}
+
+# rmdir removes the reparse point only. Remove-Item -Recurse on a junction can
+# walk into the target and delete real files.
+function Remove-Junction {
+    param([string]$Path)
+    & cmd /c rmdir "$Path" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "could not remove the junction at $Path" }
+}
+
 $dshHome = Get-DshHome
 $profileDir = Join-Path (Join-Path $dshHome 'profiles') $Profile
 $profileManifest = Join-Path $profileDir 'package.json'
@@ -130,6 +168,16 @@ if ($running.Count -gt 0 -and -not $Force) {
     }
 }
 
+# Pre-flight the slot before touching anything: a plain directory (or file) in
+# the package name's place cannot be replaced automatically, and discovering
+# that after editing the manifest would leave the profile half-changed.
+$slot = Get-SlotState -Path $junctionPath
+if ($slot.Kind -eq 'other' -and -not $Remove) {
+    throw ("$junctionPath exists and is not a junction (probably an npm-installed copy). " +
+        'Remove it first, then re-run.')
+}
+$slotIsOurs = ($slot.Kind -eq 'junction') -and (Test-SamePath -Left $slot.Target -Right $packageRoot)
+
 $profileLinkArgs = @(
     $linkScript,
     '--action', $(if ($Remove) { 'remove' } else { 'add' }),
@@ -141,63 +189,66 @@ $profileLinkArgs = @(
 
 if ($DryRun) {
     Write-Host ('[dry run] node "' + $nodeExe + '" ' + ($profileLinkArgs -join ' '))
+    Write-Host ('[dry run] slot state: ' + $slot.Kind + $(if ($slotIsOurs) { ' (already points here)' } else { '' }))
     if ($Remove) {
-        Write-Host "[dry run] delete junction $junctionPath"
+        Write-Host '[dry run] order: edit manifest first, then delete the junction'
     } else {
-        Write-Host "[dry run] create junction $junctionPath -> $packageRoot"
+        Write-Host '[dry run] order: create the junction first, then edit the manifest'
+        if ($slot.Kind -eq 'junction' -and -not $slotIsOurs) {
+            Write-Host "[dry run] would re-point the junction from '$($slot.Target)' to '$packageRoot'"
+        }
     }
     exit 0
 }
 
 if ($Remove) {
-    if (Test-Path -LiteralPath $junctionPath) {
-        $item = Get-Item -LiteralPath $junctionPath -Force
-        if ($item.LinkType -eq 'Junction') {
-            # rmdir removes the reparse point only. Remove-Item -Recurse on a
-            # junction can walk into the target and delete real files.
-            & cmd /c rmdir "$junctionPath" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "could not remove the junction at $junctionPath" }
-            Write-Host "removed junction: $junctionPath"
-        } else {
-            Write-Warning "$junctionPath is not a junction; leaving it alone."
-        }
-    }
+    # Manifest first: a leftover junction is harmless, a manifest pointing at a
+    # deleted package is not.
     & $nodeExe @profileLinkArgs
     if ($LASTEXITCODE -ne 0) { throw "profile-link.mjs failed with exit code $LASTEXITCODE" }
+
+    $slot = Get-SlotState -Path $junctionPath
+    if ($slot.Kind -eq 'junction') {
+        Remove-Junction -Path $junctionPath
+        Write-Host "removed junction: $junctionPath"
+    } elseif ($slot.Kind -eq 'other') {
+        Write-Warning "$junctionPath is not a junction; leaving it alone."
+    }
+
     Write-Host ''
     Write-Host 'Unlinked. Restart DSH to make the tools disappear.'
     exit 0
 }
 
-& $nodeExe @profileLinkArgs
-if ($LASTEXITCODE -ne 0) { throw "profile-link.mjs failed with exit code $LASTEXITCODE" }
-
+# Add: junction first, so the manifest never points at a missing directory.
+$createdJunction = $false
+$previousTarget = $slot.Target
 New-Item -ItemType Directory -Force -Path $modulesDir | Out-Null
-if (Test-Path -LiteralPath $junctionPath) {
-    $existing = Get-Item -LiteralPath $junctionPath -Force
-    if ($existing.LinkType -ne 'Junction') {
-        throw "$junctionPath exists and is not a junction. Remove it manually, then re-run."
-    }
-    $target = @($existing.Target) | Select-Object -First 1
-    $sameTarget = $false
-    if ($target) {
+if ($slotIsOurs) {
+    Write-Host "junction already correct: $junctionPath"
+} else {
+    if ($slot.Kind -eq 'junction') { Remove-Junction -Path $junctionPath }
+    New-Item -ItemType Junction -Path $junctionPath -Target $packageRoot | Out-Null
+    $createdJunction = $true
+    Write-Host "created junction: $junctionPath -> $packageRoot"
+}
+
+& $nodeExe @profileLinkArgs
+if ($LASTEXITCODE -ne 0) {
+    # Roll the slot back so the profile is not left pointing at a package the
+    # manifest does not list.
+    if ($createdJunction) {
         try {
-            $sameTarget = (Resolve-Path -LiteralPath $target).Path -eq (Resolve-Path -LiteralPath $packageRoot).Path
+            if (Test-Path -LiteralPath $junctionPath) { Remove-Junction -Path $junctionPath }
+            if ($previousTarget -and $slot.Kind -eq 'junction') {
+                New-Item -ItemType Junction -Path $junctionPath -Target $previousTarget | Out-Null
+                Write-Host "restored the previous junction target: $previousTarget"
+            }
         } catch {
-            $sameTarget = $false
+            Write-Warning "could not roll back the junction at ${junctionPath}: $($_.Exception.Message)"
         }
     }
-    if ($sameTarget) {
-        Write-Host "junction already correct: $junctionPath"
-    } else {
-        & cmd /c rmdir "$junctionPath" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "could not re-point the junction at $junctionPath" }
-        New-Item -ItemType Junction -Path $junctionPath -Target $packageRoot | Out-Null
-        Write-Host "re-pointed junction: $junctionPath"
-    }
-} else {
-    New-Item -ItemType Junction -Path $junctionPath -Target $packageRoot | Out-Null
-    Write-Host "created junction: $junctionPath"
+    throw "profile-link.mjs failed with exit code $LASTEXITCODE; the manifest was not changed"
 }
 
 Write-Host ''

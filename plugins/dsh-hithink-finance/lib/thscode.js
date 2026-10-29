@@ -60,7 +60,12 @@ export function exchangeFor(code) {
  *   | { ok: false, reason: 'empty' | 'not_a_code' | 'ambiguous_exchange', input: string }}
  */
 export function normalizeThsCode(input) {
-  const raw = typeof input === 'string' ? input.trim() : '';
+  // A non-string is never "empty": reporting it as empty sends the caller
+  // looking for a blank field that does not exist.
+  if (typeof input !== 'string') {
+    return { ok: false, reason: 'not_a_code', input: String(input ?? '') };
+  }
+  const raw = input.trim();
   if (raw === '') return { ok: false, reason: 'empty', input: raw };
 
   const upper = raw.toUpperCase();
@@ -100,7 +105,7 @@ export function normalizeThsCodeList(inputs) {
     const result = normalizeThsCode(input);
     const text = typeof input === 'string' ? input.trim() : String(input ?? '');
     if (!result.ok) {
-      // A blank entry is dropped silently; a rejected one is reported, because
+      // A blank string is dropped silently; anything else is reported, because
       // the caller has to decide whether to search for it.
       if (text !== '') rejected.push({ input: text, reason: result.reason });
       continue;
