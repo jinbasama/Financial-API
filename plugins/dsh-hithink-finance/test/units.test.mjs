@@ -42,17 +42,19 @@ test('thscode: prefix form is flipped', () => {
   assert.equal(normalizeThsCode('SZ000001').thscode, '000001.SZ');
 });
 
-test('thscode: bare codes map to the right exchange', () => {
+test('thscode: bare stock codes map to the right exchange', () => {
   assert.equal(normalizeThsCode('600519').thscode, '600519.SH');
+  assert.equal(normalizeThsCode('688981').thscode, '688981.SH');
   assert.equal(normalizeThsCode('900901').thscode, '900901.SH');
   assert.equal(normalizeThsCode('000001').thscode, '000001.SZ');
   assert.equal(normalizeThsCode('300750').thscode, '300750.SZ');
   assert.equal(normalizeThsCode('920002').thscode, '920002.BJ');
   assert.equal(normalizeThsCode('830799').thscode, '830799.BJ');
+  assert.equal(normalizeThsCode('430047').thscode, '430047.BJ');
 });
 
 test('thscode: a company name is refused, never guessed', () => {
-  const result = normalizeThsCode('璐靛窞鑼呭彴');
+  const result = normalizeThsCode('贵州茅台');
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'not_a_code');
 });
@@ -64,16 +66,70 @@ test('thscode: unknown suffix is refused', () => {
 });
 
 test('thscode: list keeps order, dedupes, reports rejects', () => {
-  const { thscodes, rejected } = normalizeThsCodeList(['600519', '000001.SZ', '600519.SH', '鑼呭彴', '']);
+  const { thscodes, rejected } = normalizeThsCodeList(['600519', '000001.SZ', '600519.SH', '贵州茅台', '']);
   assert.deepEqual(thscodes, ['600519.SH', '000001.SZ']);
-  assert.deepEqual(rejected, ['鑼呭彴']);
+  assert.deepEqual(rejected, [{ input: '贵州茅台', reason: 'not_a_code' }]);
 });
 
-test('exchangeFor: numeric ranges', () => {
+test('exchangeFor: only unambiguous stock ranges are inferred', () => {
   assert.equal(exchangeFor('688981'), 'SH');
+  assert.equal(exchangeFor('600519'), 'SH');
+  assert.equal(exchangeFor('900901'), 'SH');
+  assert.equal(exchangeFor('000001'), 'SZ');
+  assert.equal(exchangeFor('300750'), 'SZ');
+  assert.equal(exchangeFor('200002'), 'SZ');
   assert.equal(exchangeFor('430047'), 'BJ');
-  assert.equal(exchangeFor('159915'), 'SZ');
+  assert.equal(exchangeFor('920002'), 'BJ');
 });
+
+// --- regressions found during the M0 audit -------------------------------
+
+test('thscode: inner whitespace is not spliced into a code', () => {
+  // "600 519" must not become 600519.SH: silently repairing broken input hides
+  // a caller bug and can resolve to the wrong listed company.
+  assert.equal(normalizeThsCode('600 519').ok, false);
+  assert.equal(normalizeThsCode('600519 .SH').ok, false);
+  assert.equal(normalizeThsCode(' 600519 ').thscode, '600519.SH');
+});
+
+test('thscode: funds, bonds and the old NEEQ board are refused, not guessed', () => {
+  // The first version had a catch-all `-> SZ`, which mapped a Shanghai ETF
+  // (510300) and a Shanghai convertible bond (110038) to Shenzhen: a
+  // valid-looking but wrong symbol. Refusing is the correct behaviour.
+  for (const code of ['510300', '159915', '110038', '400001', '500001']) {
+    const result = normalizeThsCode(code);
+    assert.equal(result.ok, false, `${code} must not be assumed`);
+    assert.equal(result.reason, 'ambiguous_exchange', code);
+  }
+});
+
+test('thscode: an explicit suffix still works for a non-stock symbol', () => {
+  // 510300.SH is unambiguous once the caller states the exchange.
+  assert.deepEqual(normalizeThsCode('510300.SH'), { ok: true, thscode: '510300.SH', changed: false });
+  assert.equal(normalizeThsCode('sh510300').thscode, '510300.SH');
+});
+
+test('credentials: a UTF-8 BOM does not hide the key line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hithink-bom-'));
+  const file = join(dir, 'credentials.env');
+  writeFileSync(file, '\uFEFFHITHINK_FINANCE_API_KEY=bom-key-123\n', 'utf8');
+  assert.equal(readCredentialFile(file).key, 'bom-key-123');
+});
+
+test('credentials: a blank dshHome does not become a relative path', () => {
+  const candidates = credentialFileCandidates({ dshHome: '   ', env: { DSH_HOME: '   ' } });
+  assert.equal(candidates[0].includes('hithink-finance'), true);
+  assert.equal(isAbsolute(candidates[0]), true, candidates[0]);
+});
+
+test('config: an unusable baseUrl falls back instead of producing a broken URL', () => {
+  assert.equal(normalizeConfig({ baseUrl: 'https://' }).baseUrl, DEFAULTS.baseUrl);
+  assert.equal(normalizeConfig({ baseUrl: 'ftp://x.test' }).baseUrl, DEFAULTS.baseUrl);
+  assert.equal(normalizeConfig({ baseUrl: 'not a url' }).baseUrl, DEFAULTS.baseUrl);
+  assert.equal(normalizeConfig({ baseUrl: 'http://127.0.0.1:8080/' }).baseUrl, 'http://127.0.0.1:8080');
+});
+
+// --- credentials ---------------------------------------------------------
 
 test('credentials: explicit config wins', () => {
   const resolved = resolveApiKey({
@@ -134,34 +190,3 @@ test('redact: strips the secret everywhere it appears', () => {
   assert.equal(redact(text, ''), text);
   assert.equal(redact('abc', 'abc'), 'abc'); // too short to be a real key
 });
-
-// --- regressions found during the M0 audit -------------------------------
-
-test('thscode: inner whitespace is not spliced into a code', () => {
-  // "600 519" must not become 600519.SH: silently repairing broken input hides
-  // a caller bug and can resolve to the wrong listed company.
-  assert.equal(normalizeThsCode('600 519').ok, false);
-  assert.equal(normalizeThsCode('600519 .SH').ok, false);
-  assert.equal(normalizeThsCode(' 600519 ').thscode, '600519.SH');
-});
-
-test('credentials: a UTF-8 BOM does not hide the key line', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'hithink-bom-'));
-  const file = join(dir, 'credentials.env');
-  writeFileSync(file, '\uFEFFHITHINK_FINANCE_API_KEY=bom-key-123\n', 'utf8');
-  assert.equal(readCredentialFile(file).key, 'bom-key-123');
-});
-
-test('credentials: a blank dshHome does not become a relative path', () => {
-  const candidates = credentialFileCandidates({ dshHome: '   ', env: { DSH_HOME: '   ' } });
-  assert.equal(candidates[0].includes('hithink-finance'), true);
-  assert.equal(isAbsolute(candidates[0]), true, candidates[0]);
-});
-
-test('config: an unusable baseUrl falls back instead of producing a broken URL', () => {
-  assert.equal(normalizeConfig({ baseUrl: 'https://' }).baseUrl, DEFAULTS.baseUrl);
-  assert.equal(normalizeConfig({ baseUrl: 'ftp://x.test' }).baseUrl, DEFAULTS.baseUrl);
-  assert.equal(normalizeConfig({ baseUrl: 'not a url' }).baseUrl, DEFAULTS.baseUrl);
-  assert.equal(normalizeConfig({ baseUrl: 'http://127.0.0.1:8080/' }).baseUrl, 'http://127.0.0.1:8080');
-});
-

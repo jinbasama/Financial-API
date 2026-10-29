@@ -33,11 +33,11 @@ node test/units.test.mjs; $LASTEXITCODE
 
 | 文件 | 例数 | 覆盖 |
 | --- | --- | --- |
-| `units.test.mjs` | 20 | 配置默认值/钳制/域开关/baseUrl 校验；代码归一化（沪/深/北、前缀式、拒中文名、拒内部空格）；凭据 5 层顺序、拒引号、BOM、空 `dshHome` 不退化；`redact` |
+| `units.test.mjs` | 22 | 配置默认值/钳制/域开关/baseUrl 校验；代码归一化（沪/深/北、前缀式、拒中文名、拒内部空格、**拒基金/债券/三板代码**、显式后缀放行）；凭据 5 层顺序、拒引号、BOM、空 `dshHome` 不退化；`redact` |
 | `profile-link.test.mjs` | 8 | `add` 写入形状；幂等（二次运行不写文件、不产生新备份）；`remove` 后**逐字节等于原文件**；报告被替换的旧版本；`check` 退出码；BOM 清单；缺清单时报错；`dependencies` 结构异常时修复 |
 | `plugin.test.mjs` | 7 | 只注册 doctor；有 Key 时零告警；`enabled:false` 注册为空；四种恶意上下文下不抛；重复 apply 不重复注册同 id；`selectTools` 的域语义；doctor 输出**不含 Key** |
 
-合计 35 例。全部在重启 DSH 之前就能跑。
+合计 37 例。全部在重启 DSH 之前就能跑。
 
 ### 测试的环境隔离
 
@@ -81,7 +81,7 @@ L3 起需要 M1；L4 还需要 Key。
 
 ```bash
 npm run check   # 七个文件的语法检查
-npm test        # 35 例
+npm test        # 37 例
 ```
 
 两个命令退出码都为 0 才算过。`npm run check` 覆盖 `lib/**` 与 `scripts/profile-link.mjs`；`install.ps1` 不进 node 检查，靠 `-DryRun` 实测。

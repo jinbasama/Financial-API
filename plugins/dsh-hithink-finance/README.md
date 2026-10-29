@@ -85,7 +85,7 @@ Key 只在 `apply` 时读一次——改完要重启 DSH。细节与轮换见 [d
 
 ```bash
 npm run check   # 七个文件的语法检查
-npm test        # 35 例，无第三方框架、无网络
+npm test        # 37 例，无第三方框架、无网络
 ```
 
 测试布局、覆盖与未覆盖、沙箱 `EPERM` 坑见 [docs/TESTING.md](docs/TESTING.md)。
@@ -105,7 +105,7 @@ npm test        # 35 例，无第三方框架、无网络
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 症状→原因→处置、业务码表、五条快速判据 |
 | [docs/TESTING.md](docs/TESTING.md) | 怎么跑、覆盖什么、没覆盖什么、真实验收流程 |
 | [docs/UPSTREAM.md](docs/UPSTREAM.md) | 上游来源、MIT 复用逐文件表、许可证边界、同步与漂移巡检 |
-| [docs/AUDIT-2026-10-29.md](docs/AUDIT-2026-10-29.md) | M0 代码审计：18 项缺陷、复核结论、残留风险 |
+| [docs/AUDIT-2026-10-29.md](docs/AUDIT-2026-10-29.md) | M0 代码审计：20 项缺陷、复核结论、残留风险 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本记录 |
 | [AGENTS.md](AGENTS.md) | 给后续 agent 的约束与文档同步表 |
 
@@ -120,7 +120,7 @@ lib/tools/diag.js         hithink_doctor
 lib/tools/render.js       输出渲染
 scripts/profile-link.mjs  profile 清单改写（保留键序与行尾）
 install.ps1               安装/卸载（junction + 清单）
-test/                     35 例，node:test
+test/                     37 例，node:test
 docs/                     九份文档
 ```
 
