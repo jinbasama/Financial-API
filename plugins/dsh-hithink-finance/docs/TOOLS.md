@@ -27,7 +27,7 @@
     "configured": false,
     "source": "none",
     "credentialFiles": [
-      "C:\\Users\\<user>\\AppData\\Roaming\\..\\..\\dsh-home\\hithink-finance\\credentials.env",
+      "C:\\Users\\<user>\\.dsh\\hithink-finance\\credentials.env",
       "C:\\Users\\<user>\\AppData\\Roaming\\hithink-finance\\credentials.env"
     ],
     "notes": []

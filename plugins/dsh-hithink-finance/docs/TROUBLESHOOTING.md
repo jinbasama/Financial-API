@@ -2,12 +2,15 @@
 
 先记住一句话：**上游的鉴权/业务错误一律 HTTP 200**，判断成功只看响应体里的 `code`。任何「HTTP 200 就是成功」的直觉在这里都是错的。
 
-实测证据（2026-10-29）：
+实测证据（2026-10-29，三种请求头状态各打一次）：
 
 ```
-GET /api/a-share/prices/snapshot?thscodes=600519.SH           → 200 {"code":2003,"message":"Missing X-api-key"}
-GET 同上 + X-api-key: invalid-probe-key                        → 200 {"code":2003,"message":"Invalid or revoked API key"}
+无 X-api-key 头   → HTTP 200  {"code":2003,"message":"Missing X-api-key"}
+空 X-api-key 头   → HTTP 200  {"code":2003,"message":"Missing X-api-key"}
+乱码 Key          → HTTP 200  {"code":2003,"message":"Invalid or revoked API key"}
 ```
+
+> **文档与实测不一致，以实测为准**：官方文档写「缺失或无效返回 `2001`，无权访问返回 `2003`」，但线上从未观测到 `2001`——缺失、无效都落在 `2003`，只能靠 `message` 文本区分。插件因此按 message 细分（`Missing` / `Invalid or revoked` / 其余视为权限），不按 code 细分。
 
 ## 1. 症状 → 原因 → 处置
 
@@ -15,33 +18,42 @@ GET 同上 + X-api-key: invalid-probe-key                        → 200 {"code"
 | --- | --- | --- |
 | 会话里看不到任何 `hithink_*` 工具 | 插件没加载 / `enabled:false` / 没重启 | 查 profile `bundles` 是否含包名；`enabled`；重启 |
 | 只有 `hithink_doctor`，没有数据工具 | 域开关没开，或还在 M0 | M0 本来就只有 doctor；数据工具 M1+ 才有 |
-| `AUTH_MISSING` | 5 层都没找到 Key | `hithink_doctor` 看 `auth.credentialFiles`，按第一条路径放文件 |
+| `AUTH_MISSING` | 本地 5 层都没找到 Key | `hithink_doctor` 看 `auth.credentialFiles`，按第一条路径放文件 |
+| `Missing X-api-key`（来自上游） | Key 没送到：文件读到了但没进请求头，或配置被覆盖 | 查 `hithink_doctor` 的 `auth.source`；改了配置要重启 |
+| `AUTH_INVALID` / `Invalid or revoked API key` | Key 被删、拼错、带了引号 | 重新签发；检查 `credentials.env` 值没有引号 |
 | `AUTH_DENIED` | Key 有效但没这个 capability 的权限 | 去官网申请权限；**不要重试**，重试不会变好 |
-| `Invalid or revoked API key` | Key 被删/拼错/带了引号 | 重新签发；检查 `credentials.env` 值没有引号 |
 | 改了 Key 但行为没变 | 只在 `apply` 时读一次 | **重启 DSH** |
 | `RATE_LIMITED` | 触发动态限流（`code=4001`/HTTP 429） | 插件已按 `Retry-After` 退避重试；仍失败就降频、改批量端点 |
 | `EMPTY`（3002） | 非交易日 / today-only 类查了历史日 / 报告期不存在 | 先查交易日历；别把空数据当故障，别补 0 |
-| `SYMBOL_INVALID` | 传了中文名或未知后缀 | 先 `hithink_symbol_search` 拿 `thscode` |
+| `SYMBOL_INVALID` | 传了中文名、未知后缀，或基金/债券代码没写交易所 | 先 `hithink_symbol_search`；或用显式后缀 `510300.SH` |
 | `UPSTREAM_INVALID_RESPONSE` | 上游契约变了 | 带上 `requestId` 报障；跑 `git pull` 跟上游文档 |
 | 结果被截断 | 超过落盘阈值 | 正常行为：完整结果在返回的 `path` 里 |
 | 整个 Web UI 打不开 / 报 `Failed to load plugins` | 插件在 `apply` 里抛了 | 极少见（`apply` 全程 try/catch）；用 `enabled:false` 或卸载隔离 |
 
 ## 2. 业务码表
 
-| code | 含义 | 插件归类 | 可重试 |
-| --- | --- | --- | --- |
-| 0 | 成功 | — | — |
-| 1001 | 参数缺失 | `VALIDATION` | 否 |
-| 1003 | 参数非法（含窗口超限、非法枚举） | `VALIDATION` | 否 |
-| 2001 | Key 缺失/无效 | `AUTH_MISSING` | 否 |
-| 2003 | 无权访问该 capability / Key 已吊销 | `AUTH_DENIED` | 否 |
-| 3001 | 标的不存在 | `SYMBOL_INVALID` | 否 |
-| 3002 | 空数据 | `EMPTY` | 否 |
-| 4001 | 限流 | `RATE_LIMITED` | 是（有上限） |
-| 5001 / 5002 / 5003 | 服务端错误 | `UPSTREAM` | 是（有上限） |
-| 5xxx 其他 | 服务端错误 | `UPSTREAM` | 否 |
+| code | 文档含义 | 实测行为 | 插件归类 | 可重试 |
+| --- | --- | --- | --- | --- |
+| 0 | 成功 | 成功 | — | — |
+| 1001 | 参数缺失 | 未观测到，按文档实现 | `VALIDATION` | 否 |
+| 1003 | 参数非法（含窗口超限、非法枚举） | 未观测到，按文档实现 | `VALIDATION` | 否 |
+| 2001 | 文档：Key 缺失或无效 | **未观测到** | 按 `AUTH_INVALID` 处理 | 否 |
+| 2003 | 文档：无权访问该 capability | **缺失 Key、无效 Key、无权限三种都返回它** | 看 `message` 细分 | 否 |
+| 3001 | 标的不存在 | 未观测到 | `SYMBOL_INVALID` | 否 |
+| 3002 | 空数据 | 未观测到 | `EMPTY` | 否 |
+| 4001 | 限流 | 未观测到（HTTP 429 可作旁证） | `RATE_LIMITED` | 是（有上限） |
+| 5001 / 5002 / 5003 | 服务端错误 | 未观测到 | `UPSTREAM` | 是（有上限） |
+| 5xxx 其他 | 服务端错误 | 未观测到 | `UPSTREAM` | 否 |
 
-`2001` 与 `2003` 必须分开对待：前者是「你没配」，后者是「你配了但没权限」。用户要做的事完全不同，所以插件不合并成一句「认证失败」。
+**`2003` 的三种含义必须靠 `message` 区分**（实测）：
+
+| message | 真实含义 | 用户该做什么 |
+| --- | --- | --- |
+| `Missing X-api-key` | Key 没送到上游 | 查插件有没有读到 Key、改完是否重启 |
+| `Invalid or revoked API key` | Key 失效/被吊销 | 重新签发，更新凭据文件 |
+| 其他（含权限字样） | Key 有效但没这个 capability | 到官网申请权限，重试无用 |
+
+合并成一句「认证失败」会让用户做错事——这正是插件按 message 细分的原因。
 
 ## 3. 五条快速判据
 

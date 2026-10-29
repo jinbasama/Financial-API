@@ -335,21 +335,32 @@ hithink_doctor
 
 ## 7. 错误模型
 
-对外只暴露 4 类，每类都带「下一步做什么」：
+对外只暴露 6 类，每类都带「下一步做什么」：
 
 | 类别 | 触发 | 对外消息要点 |
 | --- | --- | --- |
-| `AUTH_MISSING` | 1–4 层都没找到 Key | 去 `admin/`（带斜杠）签发；给出可复制的设 Key 命令 |
-| `AUTH_DENIED` | 业务码 2001/2003 | Key 有效但无权该能力 → 需要到官网申请权限；**不要重试** |
+| `AUTH_MISSING` | 本地 1–4 层都没找到 Key | 去 `admin/`（带斜杠）签发；给出可复制的设 Key 命令 |
+| `AUTH_INVALID` | 上游消息 `Invalid or revoked API key` | Key 被吊销或拼错 → 重新签发，**不要重试** |
+| `AUTH_DENIED` | 上游 2003 且消息关于权限 | 该 Key 无权这个 capability → 到官网申请权限；**不要重试** |
 | `RATE_LIMITED` | 业务码 4001 / HTTP 429 | 已重试 N 次；建议降低频率或改用批量端点 |
 | `SYMBOL_INVALID` | thscode 归一化失败 / 业务码 3001 | 先调 `hithink_symbol_search` 消歧 |
 | `EMPTY` | 业务码 3002 | 可能非交易日 / today-only / 报告期不存在；**不补 0** |
 | `UPSTREAM` | 5xxx / 网络 / 超时 / 信封不合法 | 已重试；给 request_id 便于上报 |
 
+**一条必须记住的实测偏差**：官方文档说「缺失或无效返回 `2001`，无权返回 `2003`」，但 2026-10-29 实测三次调用（无头 / 空头 / 乱码 Key）**全部返回 `2003`**：
+
+```
+no header      HTTP 200  code=2003  message=Missing X-api-key
+empty header   HTTP 200  code=2003  message=Missing X-api-key
+garbage key    HTTP 200  code=2003  message=Invalid or revoked API key
+```
+
+所以 M1 的分类**不能只按 code 分支**，必须结合 `message` 文本：`Missing` → 本地没配或没送到；`Invalid or revoked` → Key 失效；其余 2003 → 权限。`2001` 保留映射但视为「文档有、未观测到」。
+
 规则：
 
 - **所有对外文本过 `redact()`**（Key 绝不能出现在错误里）。
-- 业务码 2003 与 2001 分开表述（一个「没配」一个「没权」，用户动作完全不同）。
+- 「没配」「失效」「没权」三种必须分开表述——用户动作完全不同。
 - 返回值里带 `request_id`（实测每次响应都有），出问题能对上对方日志。
 
 ---
