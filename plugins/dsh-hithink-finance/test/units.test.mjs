@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 
 import { normalizeConfig, enabledDomains, DEFAULTS } from '../lib/config.js';
 import { normalizeThsCode, normalizeThsCodeList, exchangeFor } from '../lib/thscode.js';
-import { resolveApiKey, readCredentialFile, redact } from '../lib/credentials.js';
+import { resolveApiKey, readCredentialFile, credentialFileCandidates, redact } from '../lib/credentials.js';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 test('config: empty input yields defaults', () => {
   const config = normalizeConfig(undefined);
@@ -133,5 +133,35 @@ test('redact: strips the secret everywhere it appears', () => {
   assert.equal(redact(text, 'abcd1234'), 'key=*** and again ***');
   assert.equal(redact(text, ''), text);
   assert.equal(redact('abc', 'abc'), 'abc'); // too short to be a real key
+});
+
+// --- regressions found during the M0 audit -------------------------------
+
+test('thscode: inner whitespace is not spliced into a code', () => {
+  // "600 519" must not become 600519.SH: silently repairing broken input hides
+  // a caller bug and can resolve to the wrong listed company.
+  assert.equal(normalizeThsCode('600 519').ok, false);
+  assert.equal(normalizeThsCode('600519 .SH').ok, false);
+  assert.equal(normalizeThsCode(' 600519 ').thscode, '600519.SH');
+});
+
+test('credentials: a UTF-8 BOM does not hide the key line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hithink-bom-'));
+  const file = join(dir, 'credentials.env');
+  writeFileSync(file, '\uFEFFHITHINK_FINANCE_API_KEY=bom-key-123\n', 'utf8');
+  assert.equal(readCredentialFile(file).key, 'bom-key-123');
+});
+
+test('credentials: a blank dshHome does not become a relative path', () => {
+  const candidates = credentialFileCandidates({ dshHome: '   ', env: { DSH_HOME: '   ' } });
+  assert.equal(candidates[0].includes('hithink-finance'), true);
+  assert.equal(isAbsolute(candidates[0]), true, candidates[0]);
+});
+
+test('config: an unusable baseUrl falls back instead of producing a broken URL', () => {
+  assert.equal(normalizeConfig({ baseUrl: 'https://' }).baseUrl, DEFAULTS.baseUrl);
+  assert.equal(normalizeConfig({ baseUrl: 'ftp://x.test' }).baseUrl, DEFAULTS.baseUrl);
+  assert.equal(normalizeConfig({ baseUrl: 'not a url' }).baseUrl, DEFAULTS.baseUrl);
+  assert.equal(normalizeConfig({ baseUrl: 'http://127.0.0.1:8080/' }).baseUrl, 'http://127.0.0.1:8080');
 });
 

@@ -11,8 +11,12 @@
   },
   "files": [
     "lib",
+    "scripts",
+    "docs",
     "cordis.patch.yml",
-    "README.md"
+    "install.ps1",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.12"
@@ -23,7 +27,10 @@
     }
   },
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/config.js && node --check lib/credentials.js && node --check lib/thscode.js && node --check lib/tools/diag.js",
-    "test": "node test/units.test.mjs && node test/plugin.test.mjs"
+    "check": "node --check lib/index.js && node --check lib/config.js && node --check lib/credentials.js && node --check lib/thscode.js && node --check lib/tools/diag.js && node --check lib/tools/render.js && node --check scripts/profile-link.mjs",
+    "test": "node test/units.test.mjs && node test/profile-link.test.mjs && node test/plugin.test.mjs",
+    "test:units": "node test/units.test.mjs",
+    "test:link": "node test/profile-link.test.mjs",
+    "test:plugin": "node test/plugin.test.mjs"
   }
 }

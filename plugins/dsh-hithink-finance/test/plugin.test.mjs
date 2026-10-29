@@ -1,7 +1,39 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { apply } from '../lib/index.js';
+import { apply, selectTools } from '../lib/index.js';
+import { normalizeConfig } from '../lib/config.js';
+
+/**
+ * Run `fn` with every credential source pointed at a throwaway directory, so a
+ * developer machine that happens to have a real key cannot change the outcome.
+ */
+function withCleanEnv(fn) {
+  const saved = {
+    HITHINK_FINANCE_API_KEY: process.env.HITHINK_FINANCE_API_KEY,
+    FUYAO_TOKEN: process.env.FUYAO_TOKEN,
+    API_KEY: process.env.API_KEY,
+    DSH_HOME: process.env.DSH_HOME,
+    APPDATA: process.env.APPDATA,
+  };
+  const scratch = mkdtempSync(join(tmpdir(), 'hithink-plugin-'));
+  process.env.DSH_HOME = scratch;
+  process.env.APPDATA = '';
+  delete process.env.HITHINK_FINANCE_API_KEY;
+  delete process.env.FUYAO_TOKEN;
+  delete process.env.API_KEY;
+  try {
+    return fn(scratch);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 /** Minimal stand-in for the host cordis context. */
 function fakeContext() {
@@ -26,45 +58,89 @@ function fakeContext() {
 }
 
 test('apply registers exactly the doctor tool in M0', () => {
-  const { ctx, registered, warnings } = fakeContext();
-  apply(ctx, undefined);
-  assert.deepEqual(registered.map((tool) => tool.name), ['hithink_doctor']);
-  assert.equal(warnings.length, 1, 'missing key is warned exactly once');
-  assert.match(warnings[0], /no API key resolved/);
+  withCleanEnv(() => {
+    const { ctx, registered, warnings } = fakeContext();
+    apply(ctx, undefined);
+    assert.deepEqual(registered.map((tool) => tool.name), ['hithink_doctor']);
+    assert.equal(warnings.length, 1, 'missing key is warned exactly once');
+    assert.match(warnings[0], /no API key resolved/);
+  });
 });
 
 test('apply is silent when a key exists', () => {
-  const { ctx, registered, warnings } = fakeContext();
-  apply(ctx, { apiKey: 'sk-test-123456' });
-  assert.equal(registered.length, 1);
-  assert.deepEqual(warnings, []);
+  withCleanEnv(() => {
+    const { ctx, registered, warnings } = fakeContext();
+    apply(ctx, { apiKey: 'sk-test-123456' });
+    assert.equal(registered.length, 1);
+    assert.deepEqual(warnings, []);
+  });
 });
 
 test('apply registers nothing when disabled', () => {
-  const { ctx, registered } = fakeContext();
-  apply(ctx, { enabled: false });
-  assert.deepEqual(registered, []);
+  withCleanEnv(() => {
+    const { ctx, registered } = fakeContext();
+    apply(ctx, { enabled: false });
+    assert.deepEqual(registered, []);
+  });
 });
 
 test('apply never throws, even with a hostile config or context', () => {
-  assert.doesNotThrow(() => apply(undefined, undefined));
-  assert.doesNotThrow(() => apply(null, null));
-  assert.doesNotThrow(() => apply({ inject: () => { throw new Error('boom'); } }, {}));
-  assert.doesNotThrow(() => apply({ logger: () => { throw new Error('boom'); } }, {}));
+  withCleanEnv(() => {
+    // No logger on the context means apply() falls back to console.warn; capture
+    // it so the test run stays clean and the fallback is asserted.
+    const written = [];
+    const original = console.warn;
+    console.warn = (message) => written.push(String(message));
+    try {
+      assert.doesNotThrow(() => apply(undefined, undefined));
+      assert.doesNotThrow(() => apply(null, null));
+      assert.doesNotThrow(() => apply({ inject: () => { throw new Error('boom'); } }, {}));
+      assert.doesNotThrow(() => apply({ logger: () => { throw new Error('boom'); } }, {}));
+      assert.doesNotThrow(() => apply({ inject: (s, cb) => cb({ tools: {} }) }, {}));
+    } finally {
+      console.warn = original;
+    }
+    assert.ok(written.length > 0, 'the console fallback must have been used');
+    assert.ok(written.every((line) => line.startsWith('[dsh-hithink-finance]')));
+  });
+});
+
+test('re-applying does not double-register the same tool id', () => {
+  withCleanEnv(() => {
+    const { ctx, registered } = fakeContext();
+    apply(ctx, { apiKey: 'sk-test-123456', domains: { core: true } });
+    apply(ctx, { apiKey: 'sk-test-123456', domains: { core: true } });
+    // Two apply() calls mean two registrations by the host's contract; what must
+    // not happen is one apply() registering the same id twice.
+    assert.equal(registered.length, 2);
+    assert.deepEqual(registered.map((tool) => tool.name), ['hithink_doctor', 'hithink_doctor']);
+  });
+});
+
+test('selectTools: doctor is unconditional, domain tools need their switch', () => {
+  const off = normalizeConfig({ domains: { core: false, fund: false } });
+  assert.deepEqual(selectTools(off).map((tool) => tool.id), ['hithink_doctor']);
+  assert.deepEqual(selectTools({ enabled: false }), []);
 });
 
 test('the doctor tool reports where it looked, never the key', () => {
-  const { ctx, registered } = fakeContext();
-  apply(ctx, { apiKey: 'sk-secret-value', domains: { fund: true } });
-  const doctor = registered[0];
-  const report = doctor.execute({});
+  withCleanEnv((scratch) => {
+    const { ctx, registered } = fakeContext();
+    apply(ctx, { apiKey: 'sk-secret-value', domains: { fund: true } });
+    const doctor = registered[0];
+    const report = doctor.execute({});
 
-  assert.equal(report.ok, true);
-  assert.equal(report.auth.configured, true);
-  assert.equal(report.auth.source, 'config');
-  assert.ok(Array.isArray(report.auth.credentialFiles));
-  assert.ok(report.domains.enabled.includes('fund'));
+    assert.equal(report.ok, true);
+    assert.equal(report.auth.configured, true);
+    assert.equal(report.auth.source, 'config');
+    assert.ok(Array.isArray(report.auth.credentialFiles));
+    assert.equal(report.auth.credentialFiles[0], join(scratch, 'hithink-finance', 'credentials.env'));
+    assert.ok(report.domains.enabled.includes('fund'));
+    // Only the doctor tool is implemented in M0, so every core tool is still planned.
+    assert.ok(report.tools.plannedButNotRegistered.includes('hithink_quote'));
+    assert.deepEqual(report.tools.registered, ['hithink_doctor']);
 
-  const serialized = JSON.stringify(report);
-  assert.equal(serialized.includes('sk-secret-value'), false, 'the key must never appear in output');
+    const serialized = JSON.stringify(report);
+    assert.equal(serialized.includes('sk-secret-value'), false, 'the key must never appear in output');
+  });
 });

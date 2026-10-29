@@ -44,7 +44,7 @@ export function normalizeThsCode(input) {
   const raw = typeof input === 'string' ? input.trim() : '';
   if (raw === '') return { ok: false, reason: 'empty', input: raw };
 
-  const upper = raw.toUpperCase().replace(/\s+/g, '');
+  const upper = raw.toUpperCase();
 
   if (CANONICAL.test(upper)) return { ok: true, thscode: upper, changed: upper !== raw };
 

@@ -16,7 +16,8 @@
  *   2. Only inject services that every profile provides (`tools`).
  *   3. Zero runtime dependencies: only `node:*` builtins, because third-party
  *      plugins cannot import `@deepseek-ai/*` (it lives inside app.asar).
- *   4. No log noise. A healthy plugin logs nothing.
+ *   4. No log noise. A healthy plugin logs nothing; a misconfigured one logs
+ *      once, together with what to do about it.
  *
  * Milestone: M0 -- skeleton + credentials + thscode + `hithink_doctor`. The HTTP
  * layer and the data tools land in M1.
@@ -27,16 +28,20 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { enabledDomains, normalizeConfig } from './config.js';
+import { DOMAIN_KEYS, enabledDomains, normalizeConfig } from './config.js';
 import { resolveApiKey } from './credentials.js';
 import { diagTool } from './tools/diag.js';
-import { OBJECT_OUTPUT } from './tools/render.js';
+import { objectOutput } from './tools/render.js';
 
 const PACKAGE_ID = 'dsh-hithink-finance';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 
-/** Tools planned per domain. M0 registers only `diag`; the rest arrive in M1+. */
+/**
+ * Tools each domain contributes. Only `diag` is implemented in M0; the lists for
+ * the other domains are the declared plan, surfaced by `hithink_doctor` as
+ * `plannedButNotRegistered` so a half-wired install is visible instead of silent.
+ */
 const PLANNED_BY_DOMAIN = {
   core: [
     'hithink_symbol_search',
@@ -57,7 +62,7 @@ function makeLogger(ctx) {
   let sink = null;
   try {
     const candidate = ctx?.logger;
-    sink = typeof candidate === 'function' ? candidate(PACKAGE_ID) : (candidate ?? null);
+    sink = typeof candidate === 'function' ? (candidate(PACKAGE_ID) ?? null) : (candidate ?? null);
   } catch {
     sink = null;
   }
@@ -79,22 +84,39 @@ function resolveDshHome(env = process.env) {
 
 function readVersion() {
   try {
-    const raw = readFileSync(join(packageRoot, 'package.json'), 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
     return typeof parsed.version === 'string' ? parsed.version : '0.0.0';
   } catch {
     return '0.0.0';
   }
 }
 
-/** Tools to register for this configuration. M0: diagnostics only. */
-function selectTools(settings) {
+/**
+ * Implemented, domain-gated tools. Empty in M0; filled in M1+.
+ */
+const IMPLEMENTED_TOOLS = [];
+
+/**
+ * Which tools this configuration should register.
+ *
+ * `hithink_doctor` is unconditional: it is the only way to tell "plugin loaded
+ * but misconfigured" apart from "plugin never loaded". Every other tool needs
+ * its domain switched on explicitly, so a disabled domain costs zero tokens.
+ *
+ * @param {import('./config.js').HithinkConfig} settings
+ */
+export function selectTools(settings) {
+  if (settings?.enabled === false) return [];
   const tools = [diagTool];
-  // Domain tools are added here in M1; returning only diag keeps M0 honest.
-  return tools.filter((tool) => settings.domains[tool.domain] !== false || tool.domain === 'diag');
+  for (const tool of IMPLEMENTED_TOOLS) {
+    if (DOMAIN_KEYS.includes(tool.domain) && settings.domains[tool.domain] === true) {
+      tools.push(tool);
+    }
+  }
+  return tools;
 }
 
-function registerTools(ctx, warn, { settings, creds, registered, planned, version, dshHome }) {
+function registerTools(ctx, warn, state) {
   if (typeof ctx?.inject !== 'function') {
     warn('host context has no inject(); the hithink tools were not registered');
     return;
@@ -113,17 +135,28 @@ function registerTools(ctx, warn, { settings, creds, registered, planned, versio
         return;
       }
 
-      for (const tool of selectTools(settings)) {
+      const seen = new Set();
+      for (const tool of selectTools(state.settings)) {
+        if (seen.has(tool.id)) continue;
+        seen.add(tool.id);
         try {
           const dispose = service.register({
             name: tool.id,
             description: tool.description,
             parameters: tool.parameters,
-            output: OBJECT_OUTPUT,
+            output: objectOutput(),
             execute: (args) => {
               try {
-                return tool.execute({ settings, creds, registered, planned, version, dshHome }, args ?? {});
+                return tool.execute({
+                  settings: state.settings,
+                  creds: state.creds,
+                  registered: state.registered,
+                  planned: state.planned,
+                  version: state.version,
+                  dshHome: state.dshHome,
+                }, args ?? {});
               } catch (error) {
+                // A tool must never surface as an opaque harness fault.
                 return {
                   ok: false,
                   error: {
@@ -135,7 +168,7 @@ function registerTools(ctx, warn, { settings, creds, registered, planned, versio
               }
             },
           });
-          registered.push(tool.id);
+          state.registered.push(tool.id);
           try {
             if (typeof dispose === 'function' && typeof scoped.on === 'function') {
               scoped.on('dispose', dispose);
@@ -164,10 +197,8 @@ export function apply(ctx, config) {
     const warn = makeLogger(ctx);
     const settings = normalizeConfig(config);
 
-    if (!settings.enabled) {
-      // Master switch off: registering nothing is the whole point.
-      return;
-    }
+    // Master switch off: registering nothing is the whole point.
+    if (!settings.enabled) return;
 
     if (!existsSync(join(packageRoot, 'cordis.patch.yml'))) {
       warn('cordis.patch.yml is missing from the package root; reinstall the plugin');
@@ -175,8 +206,7 @@ export function apply(ctx, config) {
 
     const dshHome = resolveDshHome();
     const creds = resolveApiKey({ config: settings, dshHome });
-    const activeDomains = enabledDomains(settings);
-    const planned = activeDomains.flatMap((domain) => PLANNED_BY_DOMAIN[domain] ?? []);
+    const planned = enabledDomains(settings).flatMap((domain) => PLANNED_BY_DOMAIN[domain] ?? []);
 
     const state = {
       settings,
@@ -189,7 +219,7 @@ export function apply(ctx, config) {
 
     registerTools(ctx, warn, state);
 
-    // Boot audit: warn exactly once, and only when the tools cannot work.
+    // Boot audit: warn exactly once, and only when the data tools cannot work.
     if (creds.key === null) {
       warn(
         'no API key resolved, so every data tool will answer AUTH_MISSING. ' +

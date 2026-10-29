@@ -79,7 +79,17 @@ function detectEol(raw) {
 
 function readProfile(path) {
   const raw = readFileSync(path, 'utf8');
-  return { raw, eol: detectEol(raw), json: JSON.parse(raw) };
+  // A BOM survives readFileSync and makes JSON.parse throw a message that says
+  // nothing about the real cause, so strip it explicitly.
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (error) {
+    console.error(`error: ${path} is not valid JSON: ${error.message}`);
+    process.exit(1);
+  }
+  return { raw, eol: detectEol(text), json };
 }
 
 function writeProfile(path, json, eol, { backup }) {
@@ -98,17 +108,26 @@ function ensureObject(parent, key) {
   return parent[key];
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const packageDir = args.packageDir
-    ? resolve(args.packageDir)
-    : resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-  const profileDir = join(dshHome(args), 'profiles', args.profile);
-  const profilePath = join(profileDir, 'package.json');
+/**
+ * Apply one action to a profile manifest.
+ *
+ * Exported so the test suite can drive it without spawning a child process
+ * (the sandbox refuses piped stdio, and a unit test should not need a shell).
+ *
+ * @param {{
+ *   action: 'add' | 'remove' | 'check',
+ *   profile: string,
+ *   dshHome: string,
+ *   name: string,
+ *   packageDir: string,
+ * }} options
+ * @returns {{ report: object, exitCode: number }}
+ */
+export function linkProfile(options) {
+  const packageDir = resolve(options.packageDir);
+  const profilePath = join(resolve(options.dshHome), 'profiles', options.profile, 'package.json');
   if (!existsSync(profilePath)) {
-    console.error(`error: no profile manifest at ${profilePath}`);
-    process.exit(1);
+    throw new Error(`no profile manifest at ${profilePath}`);
   }
 
   const { json, eol } = readProfile(profilePath);
@@ -118,64 +137,76 @@ function main() {
   if (!Array.isArray(profile.bundles)) profile.bundles = [];
 
   const linkSpec = `link:${packageDir.replace(/\\/g, '/')}`;
-  const inBundles = profile.bundles.includes(args.name);
-  const currentSpec = dependencies[args.name];
+  const inBundles = profile.bundles.includes(options.name);
+  const currentSpec = dependencies[options.name];
 
-  if (args.action === 'check') {
-    console.log(
-      JSON.stringify(
-        {
-          profile: profilePath,
-          dependency: currentSpec ?? null,
-          expected: linkSpec,
-          inBundles,
-          ok: currentSpec === linkSpec && inBundles,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(currentSpec === linkSpec && inBundles ? 0 : 1);
+  if (options.action === 'check') {
+    const ok = currentSpec === linkSpec && inBundles;
+    return {
+      report: { profile: profilePath, dependency: currentSpec ?? null, expected: linkSpec, inBundles, ok },
+      exitCode: ok ? 0 : 1,
+    };
   }
 
-  if (args.action === 'add') {
+  if (options.action === 'add') {
     const already = currentSpec === linkSpec && inBundles;
-    dependencies[args.name] = linkSpec;
-    if (!inBundles) profile.bundles.push(args.name);
+    // Report what is being replaced: a published version, another checkout, or
+    // nothing. Silently overwriting a pinned version would be rude.
+    const previous = currentSpec === undefined ? null : currentSpec;
+    dependencies[options.name] = linkSpec;
+    if (!inBundles) profile.bundles.push(options.name);
     if (!already) writeProfile(profilePath, json, eol, { backup: true });
-    console.log(
-      JSON.stringify(
-        {
-          profile: profilePath,
-          changed: !already,
-          dependency: linkSpec,
-          bundlesCount: profile.bundles.length,
-        },
-        null,
-        2,
-      ),
-    );
-    return;
+    return {
+      report: {
+        profile: profilePath,
+        changed: !already,
+        previous,
+        dependency: linkSpec,
+        bundlesCount: profile.bundles.length,
+      },
+      exitCode: 0,
+    };
   }
 
-  // remove
+  if (options.action !== 'remove') throw new Error(`unknown action: ${options.action}`);
+
   let changed = false;
   if (currentSpec !== undefined) {
-    delete dependencies[args.name];
+    delete dependencies[options.name];
     changed = true;
   }
   if (inBundles) {
-    profile.bundles = profile.bundles.filter((entry) => entry !== args.name);
+    profile.bundles = profile.bundles.filter((entry) => entry !== options.name);
     changed = true;
   }
   if (changed) writeProfile(profilePath, json, eol, { backup: true });
-  console.log(
-    JSON.stringify(
-      { profile: profilePath, changed, bundlesCount: profile.bundles.length },
-      null,
-      2,
-    ),
-  );
+  return {
+    report: { profile: profilePath, changed, bundlesCount: profile.bundles.length },
+    exitCode: 0,
+  };
 }
 
-main();
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const result = linkProfile({
+    action: args.action,
+    profile: args.profile,
+    dshHome: dshHome(args),
+    name: args.name,
+    packageDir: args.packageDir
+      ? resolve(args.packageDir)
+      : resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+  });
+  console.log(JSON.stringify(result.report, null, 2));
+  process.exit(result.exitCode);
+}
+
+// Only run when invoked directly, so tests can import linkProfile().
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`error: ${error.message}`);
+    process.exit(1);
+  }
+}

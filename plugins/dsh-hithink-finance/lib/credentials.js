@@ -34,10 +34,14 @@ const CREDENTIAL_FILE = 'credentials.env';
  */
 export function credentialFileCandidates(options = {}) {
   const env = options.env ?? process.env;
-  const dshHome = options.dshHome ?? (env.DSH_HOME || join(homedir(), '.dsh'));
+  const requested = typeof options.dshHome === 'string' ? options.dshHome.trim() : '';
+  const fromEnvironment = String(env.DSH_HOME ?? '').trim();
+  // Blank strings must not win over the fallback: join('', ...) would turn the
+  // first candidate into a path relative to the process cwd.
+  const dshHome = requested !== '' ? requested : (fromEnvironment !== '' ? fromEnvironment : join(homedir(), '.dsh'));
   const candidates = [join(dshHome, CREDENTIAL_DIR, CREDENTIAL_FILE)];
 
-  const appData = (env.APPDATA ?? '').trim();
+  const appData = String(env.APPDATA ?? '').trim();
   if (appData !== '') candidates.push(join(appData, CREDENTIAL_DIR, CREDENTIAL_FILE));
 
   return candidates;

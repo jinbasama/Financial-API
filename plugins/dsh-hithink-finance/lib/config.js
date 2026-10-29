@@ -69,6 +69,25 @@ function asText(value, fallback) {
 }
 
 /**
+ * A usable API root is an absolute http(s) URL with a host. Anything else falls
+ * back to the default rather than producing `fetch("https:/api/...")` later.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeBaseUrl(value) {
+  const text = asText(value, DEFAULTS.baseUrl).replace(/\/+$/, '');
+  try {
+    const url = new URL(text);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return DEFAULTS.baseUrl;
+    if (url.hostname === '') return DEFAULTS.baseUrl;
+    return text;
+  } catch {
+    return DEFAULTS.baseUrl;
+  }
+}
+
+/**
  * Merge user config over the defaults. Never throws: a malformed field falls
  * back to its default so a bad patch row cannot break the boot.
  *
@@ -88,7 +107,7 @@ export function normalizeConfig(raw) {
     enabled: asBoolean(source.enabled, DEFAULTS.enabled),
     apiKey: typeof source.apiKey === 'string' ? source.apiKey.trim() : DEFAULTS.apiKey,
     apiKeyEnv: asText(source.apiKeyEnv, DEFAULTS.apiKeyEnv),
-    baseUrl: asText(source.baseUrl, DEFAULTS.baseUrl).replace(/\/+$/, ''),
+    baseUrl: normalizeBaseUrl(source.baseUrl),
     domains,
     spillRows: DEFAULTS.spillRows,
     spillBytes: DEFAULTS.spillBytes,

@@ -16,38 +16,25 @@ export function renderJson(value) {
   try {
     text = JSON.stringify(value, null, 1);
   } catch (error) {
-    text = JSON.stringify({ error: { category: 'INTERNAL', message: String(error?.message ?? error) } });
+    text = JSON.stringify({
+      ok: false,
+      error: { category: 'INTERNAL', message: String(error?.message ?? error) },
+    });
   }
   return [{ type: 'text', text }];
 }
 
 /**
- * Schema for a tool that returns one free-form JSON object. DSH uses the schema
- * for validation only; `render` decides the wire form.
- */
-export const OBJECT_OUTPUT = {
-  schema: { type: 'object', additionalProperties: true },
-  render: (_args, value) => renderJson(value),
-};
-
-/**
- * Convert an Error into the flat, model-readable error object every tool throws
- * as a value (never as an exception, which would become an opaque tool fault).
+ * Build a fresh output descriptor for one tool registration.
  *
- * @param {{ category: string, message: string, hint?: string, retryable?: boolean,
- *           requestId?: string, detail?: unknown }} shape
+ * A factory rather than a shared constant: the host owns the descriptor it is
+ * given and may annotate it, so two tools must never share one object.
+ *
+ * @returns {{ schema: object, render: (args: unknown, value: unknown) => { type: string, text: string }[] }}
  */
-export function errorResult(shape) {
-  const result = {
-    ok: false,
-    error: {
-      category: shape.category,
-      message: shape.message,
-      retryable: shape.retryable === true,
-    },
+export function objectOutput() {
+  return {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => renderJson(value),
   };
-  if (shape.hint) result.error.hint = shape.hint;
-  if (shape.requestId) result.error.requestId = shape.requestId;
-  if (shape.detail !== undefined) result.error.detail = shape.detail;
-  return result;
 }
