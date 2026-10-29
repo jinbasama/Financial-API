@@ -1,0 +1,108 @@
+/**
+ * Configuration for dsh-hithink-finance.
+ *
+ * Plain JavaScript on purpose: a third-party DSH plugin cannot import
+ * `@deepseek-ai/*` (everything official lives inside app.asar), and pulling in
+ * zod would add a dependency that has to agree with the profile's own copy.
+ * Everything here is hand-validated.
+ */
+
+/** @typedef {typeof DEFAULTS} HithinkConfig */
+
+export const DEFAULTS = {
+  /** Master switch. When false the plugin registers nothing at all. */
+  enabled: true,
+  /** Explicit API key. Highest priority, but prefer the env var / credential file. */
+  apiKey: '',
+  /** Environment variable read for the API key. */
+  apiKeyEnv: 'HITHINK_FINANCE_API_KEY',
+  /** Fuyao API root. No trailing slash. */
+  baseUrl: 'https://fuyao.aicubes.cn',
+  /** Per-domain tool switches. A disabled domain registers no tools. */
+  domains: {
+    core: true,
+    special: true,
+    index: false,
+    fund: false,
+    futures: false,
+    calendar: false,
+  },
+  /** Rows above this are spilled to a file instead of being returned inline. */
+  spillRows: 200,
+  /** Serialized bytes above this are spilled to a file. */
+  spillBytes: 65536,
+  /** Single-request timeout in milliseconds. */
+  timeoutMs: 15000,
+  /** Retries after the first attempt. Kept low so a turn cannot be stalled. */
+  maxRetries: 2,
+};
+
+export const DOMAIN_KEYS = ['core', 'special', 'index', 'fund', 'futures', 'calendar'];
+
+const INTEGER_BOUNDS = {
+  spillRows: [1, 100000],
+  spillBytes: [1024, 64 * 1024 * 1024],
+  timeoutMs: [1000, 120000],
+  maxRetries: [0, 5],
+};
+
+function asBoolean(value, fallback) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+  }
+  return fallback;
+}
+
+function asInteger(value, fallback, [minimum, maximum]) {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.trunc(parsed)));
+}
+
+function asText(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed === '' ? fallback : trimmed;
+}
+
+/**
+ * Merge user config over the defaults. Never throws: a malformed field falls
+ * back to its default so a bad patch row cannot break the boot.
+ *
+ * @param {Record<string, unknown> | undefined} raw
+ * @returns {HithinkConfig}
+ */
+export function normalizeConfig(raw) {
+  const source = raw !== null && typeof raw === 'object' ? raw : {};
+  const domains = {};
+  const rawDomains =
+    source.domains !== null && typeof source.domains === 'object' ? source.domains : {};
+  for (const key of DOMAIN_KEYS) {
+    domains[key] = asBoolean(rawDomains[key], DEFAULTS.domains[key]);
+  }
+
+  const config = {
+    enabled: asBoolean(source.enabled, DEFAULTS.enabled),
+    apiKey: typeof source.apiKey === 'string' ? source.apiKey.trim() : DEFAULTS.apiKey,
+    apiKeyEnv: asText(source.apiKeyEnv, DEFAULTS.apiKeyEnv),
+    baseUrl: asText(source.baseUrl, DEFAULTS.baseUrl).replace(/\/+$/, ''),
+    domains,
+    spillRows: DEFAULTS.spillRows,
+    spillBytes: DEFAULTS.spillBytes,
+    timeoutMs: DEFAULTS.timeoutMs,
+    maxRetries: DEFAULTS.maxRetries,
+  };
+
+  for (const [key, bounds] of Object.entries(INTEGER_BOUNDS)) {
+    config[key] = asInteger(source[key], DEFAULTS[key], bounds);
+  }
+  return config;
+}
+
+/** @param {HithinkConfig} config */
+export function enabledDomains(config) {
+  return DOMAIN_KEYS.filter((key) => config.domains[key] === true);
+}

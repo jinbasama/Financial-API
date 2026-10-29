@@ -1,0 +1,21 @@
+# dsh-hithink-finance bundle patch layer.
+#
+# This package is a normal bundle (not a carrier): it mounts its own host half,
+# which registers the curated `hithink_*` tools against the Fuyao REST API.
+#
+#   - id: hithink-finance   -> this package's lib/index.js
+#
+# Config can be overridden from the profile's own patch layer
+# ($DSH_HOME/profiles/<profile>/cordis.patch.yml), e.g.:
+#
+#   - id: hithink-finance
+#     config:
+#       domains:
+#         fund: true
+#
+# Deliberately NOT mounted here: @deepseek-ai/dsh-mcp-client against the hosted
+# MCP servers. That would register all 72 upstream tools (~7-10k tokens per
+# request) and dsh-mcp-client has no tool filter. See DESIGN.md decision 2.
+- insert:
+    - id: hithink-finance
+      name: dsh-hithink-finance

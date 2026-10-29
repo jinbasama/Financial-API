@@ -1,0 +1,10 @@
+# dependencies / build output
+node_modules/
+dist/
+
+# profile manifest backups written by install.ps1
+*.bak-hithink-*
+
+# local scratch
+.tmp/
+*.log
